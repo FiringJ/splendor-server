@@ -33,7 +33,7 @@ async function runTest() {
         roomId,
         action: {
           type: 'TAKE_GEMS',
-          gems: { red: 1, blue: 1, green: 1 }
+          gems: { ruby: 1, sapphire: 1, emerald: 1 }
         }
       });
     }, 2000);

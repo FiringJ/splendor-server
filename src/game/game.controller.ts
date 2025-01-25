@@ -7,13 +7,13 @@ export class GameController {
 
   @Post('create-room')
   createRoom(@Body() body: { playerId: string }) {
-    return {
-      roomId: this.gameService.createRoom(body.playerId),
-    };
+    const roomId = this.gameService.createRoom(body.playerId);
+    return { success: true, roomId };
   }
 
   @Post('join-room')
   joinRoom(@Body() body: { roomId: string; playerId: string }) {
-    return this.gameService.joinRoom(body.roomId, body.playerId);
+    const room = this.gameService.joinRoom(body.roomId, body.playerId);
+    return { success: true, room };
   }
 } 

@@ -2,6 +2,7 @@ export type GemType = keyof Gems;
 
 export interface Player {
   id: string;
+  clientId?: string;  // Socket.IO的客户端ID
   name: string;
   gems: Gems;
   cards: Card[];
@@ -59,7 +60,7 @@ export interface GameState {
 export interface GameRoom {
   id: string;
   players: Player[];
-  gameState: GameState;
+  gameState: GameState | null;
   status: 'waiting' | 'playing' | 'finished';
 }
 
@@ -68,10 +69,31 @@ export interface RoomState {
   players: Player[];
   hostId: string;
   status: 'waiting' | 'playing' | 'finished';
+  gameState: GameState | null;
+}
+
+export type GameActionType =
+  | 'TAKE_GEMS'
+  | 'PURCHASE_CARD'
+  | 'RESERVE_CARD'
+  | 'CLAIM_NOBLE'
+  | 'DISCARD_GEMS';
+
+export interface TakeGemsAction {
+  type: 'TAKE_GEMS';
+  playerId: string;
+  gems: Partial<Record<GemType, number>>;
+}
+
+export interface DiscardGemsAction {
+  type: 'DISCARD_GEMS';
+  playerId: string;
+  gems: Partial<Record<GemType, number>>;
 }
 
 export type GameAction =
-  | { type: 'TAKE_GEMS'; gems: Partial<Record<GemType, number>>; playerId: string }
-  | { type: 'BUY_CARD'; cardId: number; playerId: string }
+  | TakeGemsAction
+  | { type: 'PURCHASE_CARD'; cardId: number; playerId: string }
   | { type: 'RESERVE_CARD'; cardId: number; playerId: string }
-  | { type: 'START_GAME'; } 
+  | { type: 'START_GAME'; }
+  | DiscardGemsAction; 

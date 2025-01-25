@@ -62,10 +62,15 @@ export class GameService {
   // 处理游戏动作
   public handleGameAction(roomId: string, action: GameAction): GameRoom {
     try {
-      this.logger.debug(`Handling action ${action.type} for room ${roomId}`);
+      this.logger.debug('Handling game action:', {
+        roomId,
+        actionType: action.type,
+        actionDetails: action
+      });
 
       const room = this.rooms.get(roomId);
       if (!room) {
+        this.logger.error('Room not found:', { roomId });
         throw new GameError('Room not found', 'ROOM_NOT_FOUND', { roomId });
       }
 
@@ -74,20 +79,27 @@ export class GameService {
 
       // 验证动作合法性
       if (!this.validateAction(newState, action)) {
+        this.logger.error('Invalid action:', { action });
         throw new GameError('Invalid action', 'INVALID_ACTION', { action });
       }
+
+      this.logger.debug('Action validation passed, processing action...');
 
       switch (action.type) {
         case 'TAKE_GEMS':
           newState = this.handleTakeGems(newState, action.playerId, action.gems);
           break;
-        case 'BUY_CARD':
+        case 'PURCHASE_CARD':
           newState = this.handleBuyCard(newState, action.playerId, action.cardId);
           break;
         case 'RESERVE_CARD':
           newState = this.handleReserveCard(newState, action.playerId, action.cardId);
           break;
+        case 'DISCARD_GEMS':
+          newState = this.handleDiscardGems(newState, action.playerId, action.gems);
+          break;
         default:
+          this.logger.error('Invalid action type:', { action });
           throw new GameError('Invalid action type', 'INVALID_ACTION_TYPE', { action });
       }
 
@@ -101,13 +113,24 @@ export class GameService {
       room.gameState = newState;
       this.rooms.set(roomId, room);
 
-      this.logger.debug(`Action handled successfully`);
+      this.logger.debug('Action handled successfully:', {
+        roomId,
+        actionType: action.type,
+        currentTurn: newState.currentTurn,
+        playerCount: newState.players.size
+      });
+
       return room;
     } catch (error) {
       if (error instanceof GameError) {
         throw error;
       }
-      this.logger.error('Failed to handle game action', error);
+      this.logger.error('Failed to handle game action:', {
+        roomId,
+        action,
+        error: error.message,
+        stack: error.stack
+      });
       throw new GameError(
         'Failed to handle game action',
         'ACTION_FAILED',
@@ -141,12 +164,12 @@ export class GameService {
   // 私有方法：处理拿取宝石
   private handleTakeGems(state: GameState, playerId: string, selectedGems: Partial<Record<GemType, number>>): GameState {
     if (!this.canTakeGems(selectedGems, state)) {
-      throw new Error('Invalid gems selection');
+      throw new GameError('Invalid gems selection', 'INVALID_GEMS_SELECTION');
     }
 
     const newState = { ...state };
     const player = newState.players.get(playerId);
-    if (!player) throw new Error('Player not found');
+    if (!player) throw new GameError('Player not found', 'PLAYER_NOT_FOUND');
 
     // 更新宝石数量
     Object.entries(selectedGems).forEach(([gem, count]) => {
@@ -156,6 +179,16 @@ export class GameService {
       newState.gems[gemType] -= count;
       player.gems[gemType] = (player.gems[gemType] || 0) + count;
     });
+
+    // 检查玩家宝石总数是否超过10个
+    const totalGems = Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
+    if (totalGems > 10) {
+      throw new GameError(
+        'Player must discard gems to have 10 or fewer',
+        'GEMS_OVERFLOW',
+        { currentTotal: totalGems, playerId }
+      );
+    }
 
     return this.endTurn(newState);
   }
@@ -217,6 +250,48 @@ export class GameService {
     this.removeAndReplenishCard(newState, card);
 
     return this.endTurn(newState);
+  }
+
+  // 私有方法：处理丢弃宝石
+  private handleDiscardGems(state: GameState, playerId: string, gemsToDiscard: Partial<Record<GemType, number>>): GameState {
+    const newState = { ...state };
+    const player = newState.players.get(playerId);
+    if (!player) throw new GameError('Player not found', 'PLAYER_NOT_FOUND');
+
+    // 验证丢弃的宝石数量
+    const currentTotal = Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
+    const discardTotal = Object.values(gemsToDiscard).reduce((sum, count) => sum + (count || 0), 0);
+    const remainingTotal = currentTotal - discardTotal;
+
+    if (remainingTotal > 10) {
+      throw new GameError(
+        'Must discard enough gems to have 10 or fewer',
+        'INVALID_DISCARD',
+        { currentTotal, discardTotal, remainingTotal }
+      );
+    }
+
+    // 验证玩家是否有足够的宝石可以丢弃
+    for (const [gemType, count] of Object.entries(gemsToDiscard)) {
+      const availableGems = player.gems[gemType as GemType] || 0;
+      if ((count || 0) > availableGems) {
+        throw new GameError(
+          'Player does not have enough gems to discard',
+          'INVALID_DISCARD',
+          { gemType, requested: count, available: availableGems }
+        );
+      }
+    }
+
+    // 执行丢弃操作
+    Object.entries(gemsToDiscard).forEach(([gemType, count]) => {
+      if (!count) return;
+      const type = gemType as GemType;
+      player.gems[type] = (player.gems[type] || 0) - count;
+      newState.gems[type] = (newState.gems[type] || 0) + count;
+    });
+
+    return newState;
   }
 
   // 私有方法：游戏辅助函数
@@ -328,20 +403,16 @@ export class GameService {
 
   // 游戏规则验证方法
   private canTakeGems(selectedGems: Partial<Record<GemType, number>>, state: GameState): boolean {
-    const player = state.players.get(state.currentTurn);
-    if (!player) return false;
-
-    const currentGemCount = Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
-    const selectedGemCount = Object.values(selectedGems).reduce((sum, count) => sum + (count || 0), 0);
-
-    // 检查是否会超过宝石上限
-    if (currentGemCount + selectedGemCount > 10) return false;
-
     // 禁止选择黄金
     if (selectedGems.gold) return false;
 
     const differentColors = Object.keys(selectedGems).length;
     const sameColorCount = Math.max(...Object.values(selectedGems).map(v => v || 0));
+
+    // 检查是否有足够的宝石可以拿
+    for (const [type, count] of Object.entries(selectedGems) as [GemType, number][]) {
+      if (count > 0 && (state.gems[type] ?? 0) < count) return false;
+    }
 
     // 规则1: 拿取2个同色宝石
     if (sameColorCount === 2) {
@@ -357,8 +428,7 @@ export class GameService {
       for (const [gemType, count] of Object.entries(selectedGems)) {
         if ((state.gems[gemType as GemType] || 0) < (count || 0)) return false;
       }
-
-      return differentColors === 3 || (differentColors > 0 && differentColors <= Math.min(3, 10 - currentGemCount));
+      return differentColors <= 3;
     }
 
     return false;
@@ -556,7 +626,7 @@ export class GameService {
           case 'TAKE_GEMS':
             newState = this.handleTakeGems(newState, action.playerId, action.gems);
             break;
-          case 'BUY_CARD':
+          case 'PURCHASE_CARD':
             newState = this.handleBuyCard(newState, action.playerId, action.cardId);
             break;
           case 'RESERVE_CARD':
@@ -576,5 +646,77 @@ export class GameService {
         return state;
       }
     }, initialState);
+  }
+
+  // 创建房间
+  public createRoom(playerId: string): string {
+    try {
+      const roomId = uuidv4();
+      const room: GameRoom = {
+        id: roomId,
+        players: [{
+          id: playerId,
+          name: `玩家1`,
+          gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
+          cards: [],
+          reservedCards: [],
+          nobles: [],
+          points: 0
+        }],
+        status: 'waiting',
+        gameState: null
+      };
+
+      this.rooms.set(roomId, room);
+      this.logger.debug(`Room created: ${roomId}`);
+      return roomId;
+    } catch (error) {
+      this.logger.error('Failed to create room', error);
+      throw new GameError('Failed to create room', 'CREATE_ROOM_FAILED', { error });
+    }
+  }
+
+  // 加入房间
+  public joinRoom(roomId: string, playerId: string): GameRoom {
+    try {
+      const room = this.rooms.get(roomId);
+      if (!room) {
+        throw new GameError('Room not found', 'ROOM_NOT_FOUND', { roomId });
+      }
+
+      if (room.status !== 'waiting') {
+        throw new GameError('Game already started', 'GAME_STARTED', { roomId });
+      }
+
+      // 检查玩家是否已经在房间中
+      if (room.players.some(p => p.id === playerId)) {
+        throw new GameError('Player already in room', 'PLAYER_EXISTS', { roomId, playerId });
+      }
+
+      // 检查房间是否已满
+      if (room.players.length >= 4) {
+        throw new GameError('Room is full', 'ROOM_FULL', { roomId });
+      }
+
+      const newPlayer = {
+        id: playerId,
+        name: `玩家${room.players.length + 1}`,
+        gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
+        cards: [],
+        reservedCards: [],
+        nobles: [],
+        points: 0
+      };
+
+      room.players.push(newPlayer);
+      this.logger.debug(`Player ${playerId} joined room ${roomId}`);
+      return room;
+    } catch (error) {
+      this.logger.error('Failed to join room', error);
+      if (error instanceof GameError) {
+        throw error;
+      }
+      throw new GameError('Failed to join room', 'JOIN_ROOM_FAILED', { error });
+    }
   }
 } 
