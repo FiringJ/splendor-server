@@ -1,3 +1,5 @@
+export type GemType = keyof Gems;
+
 export interface Player {
   id: string;
   name: string;
@@ -9,20 +11,20 @@ export interface Player {
 }
 
 export interface Gems {
-  diamond?: number;
-  sapphire?: number;
-  emerald?: number;
-  ruby?: number;
-  onyx?: number;
-  gold?: number;
+  diamond: number;
+  sapphire: number;
+  emerald: number;
+  ruby: number;
+  onyx: number;
+  gold: number;
 }
 
 export interface Card {
   id: number;
   level: 1 | 2 | 3;
   points: number;
-  gem: keyof Gems;
-  cost: Partial<Record<keyof Gems, number>>;
+  gem: GemType;
+  cost: Partial<Record<GemType, number>>;
   image?: string;
   spritePosition: {
     x: number;  // 精灵图中的x坐标（第几列，从0开始）
@@ -34,7 +36,7 @@ export interface Noble {
   id: number;
   points: number;
   name: string;
-  requirements: Partial<Record<keyof Gems, number>>;
+  requirements: Partial<Record<GemType, number>>;
   image?: string;
 }
 
@@ -48,7 +50,7 @@ export interface GameState {
     level3: Card[];
   };
   nobles: Noble[];
-  winner?: string;
+  winner: string | null;
   lastRound: boolean;
   lastRoundStartPlayer: string | null;
   actions: GameAction[];
@@ -69,7 +71,7 @@ export interface RoomState {
 }
 
 export type GameAction =
-  | { type: 'TAKE_GEMS'; gems: Partial<Gems>; playerId: string }
-  | { type: 'BUY_CARD'; cardId: string; playerId: string }
-  | { type: 'RESERVE_CARD'; cardId: string; playerId: string }
+  | { type: 'TAKE_GEMS'; gems: Partial<Record<GemType, number>>; playerId: string }
+  | { type: 'BUY_CARD'; cardId: number; playerId: string }
+  | { type: 'RESERVE_CARD'; cardId: number; playerId: string }
   | { type: 'START_GAME'; } 

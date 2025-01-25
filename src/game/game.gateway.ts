@@ -9,9 +9,8 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
-import { GameAction } from './interfaces/game.interface';
+import { GameAction, RoomState, Player, GameState } from './interfaces/game.interface';
 import { v4 as uuidv4 } from 'uuid';
-import { RoomState } from './interfaces/game.interface';
 
 @WebSocketGateway({
   cors: {
@@ -59,11 +58,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
 
     this.rooms.set(roomId, room);
-
-    // 让创建者加入房间
     client.join(roomId);
-
-    // 广播房间创建
     this.server.to(roomId).emit('roomUpdate', room);
 
     return { roomId, room };
@@ -79,10 +74,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       return { success: false, error: 'Room not found' };
     }
 
-    // 如果玩家已经在房间里，直接返回房间信息
     if (room.players.some(p => p.id === data.playerId)) {
       client.join(data.roomId);
-      // 广播房间更新
       this.server.to(data.roomId).emit('roomUpdate', room);
       return { success: true, room };
     }
@@ -98,44 +91,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     };
 
     room.players.push(newPlayer);
-
-    // 让客户端加入房间
     client.join(data.roomId);
 
-    // 立即广播房间更新给所有玩家，包括新加入的玩家
-    this.server.to(data.roomId).emit('roomUpdate', {
-      ...room,
-      hostId: room.hostId || room.players[0].id
-    });
+    this.server.to(data.roomId).emit('roomUpdate', room);
 
-    // 返回完整的房间信息给加入的玩家
-    return {
-      success: true,
-      room: {
-        ...room,
-        hostId: room.hostId || room.players[0].id
-      }
-    };
-  }
-
-  @SubscribeMessage('gameAction')
-  handleGameAction(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; action: GameAction },
-  ) {
-    try {
-      const room = this.gameService.handleGameAction(data.roomId, data.action);
-
-      // 广播游戏状态更新
-      this.server.to(data.roomId).emit('gameStateUpdate', {
-        gameState: room.gameState,
-        status: room.status
-      });
-
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
+    return { success: true, room };
   }
 
   @SubscribeMessage('startGame')
@@ -153,37 +113,53 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { success: false, error: 'Need at least 2 players' };
       }
 
-      // 初始化游戏状态
       const gameRoom = this.gameService.initializeGame(room.players);
       room.status = 'playing';
 
-      // 将 Map 转换为数组
-      const playersArray = Array.from(gameRoom.gameState.players.values());
+      // 将 Map 转换为数组以便于传输
+      const gameState = this.convertGameStateForTransport(gameRoom.gameState);
 
-      // 广播游戏开始
       this.server.to(data.roomId).emit('gameStarted', {
-        gameState: {
-          ...gameRoom.gameState,
-          players: playersArray
-        },
+        gameState,
         status: 'playing'
       });
 
-      // 广播房间状态更新
       this.server.to(data.roomId).emit('roomUpdate', {
         ...room,
         status: 'playing'
       });
 
-      return {
-        success: true,
-        gameState: {
-          ...gameRoom.gameState,
-          players: playersArray
-        }
-      };
+      return { success: true, gameState };
     } catch (error) {
       return { success: false, error: error.message };
     }
+  }
+
+  @SubscribeMessage('gameAction')
+  handleGameAction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomId: string; action: GameAction }
+  ) {
+    try {
+      const room = this.gameService.handleGameAction(data.roomId, data.action);
+      const gameState = this.convertGameStateForTransport(room.gameState);
+
+      this.server.to(data.roomId).emit('gameStateUpdate', {
+        gameState,
+        status: room.status
+      });
+
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  // 辅助方法：将 GameState 转换为可传输的格式
+  private convertGameStateForTransport(gameState: GameState): any {
+    return {
+      ...gameState,
+      players: Array.from(gameState.players.values())
+    };
   }
 } 
