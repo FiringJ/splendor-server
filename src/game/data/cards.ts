@@ -330,7 +330,7 @@ export const LEVEL1_CARDS: Card[] = [
     cost: { diamond: 4 },
     spritePosition: { x: 2, y: 2 }
   }
-]; 
+];
 
 export const LEVEL2_CARDS: Card[] = [
   // 黑色卡牌 (6张)
@@ -582,7 +582,7 @@ export const LEVEL2_CARDS: Card[] = [
     cost: { ruby: 6 },  // 6r
     spritePosition: { x: 0, y: 2 }
   }
-]; 
+];
 
 export const LEVEL3_CARDS: Card[] = [
   // 黑色卡牌 (4张)
@@ -754,7 +754,7 @@ export const LEVEL3_CARDS: Card[] = [
     cost: { emerald: 7, ruby: 3 },  // 7g+3r
     spritePosition: { x: 3, y: 2 }
   }
-]; 
+];
 
 export const NOBLES: Noble[] = [
   // A1 - Mary Stuart

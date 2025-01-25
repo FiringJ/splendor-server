@@ -167,27 +167,9 @@ export class GameService {
 
   private generateInitialCards() {
     // 先打乱所有卡组
-    const shuffled1 = this.shuffle([...LEVEL1_CARDS]).map((card, index) => ({
-      ...card,
-      spritePosition: {
-        x: index % 4,  // 每行4张卡牌
-        y: Math.floor(index / 4)  // 根据索引计算行数
-      }
-    }));
-    const shuffled2 = this.shuffle([...LEVEL2_CARDS]).map((card, index) => ({
-      ...card,
-      spritePosition: {
-        x: index % 4,
-        y: Math.floor(index / 4)
-      }
-    }));
-    const shuffled3 = this.shuffle([...LEVEL3_CARDS]).map((card, index) => ({
-      ...card,
-      spritePosition: {
-        x: index % 4,
-        y: Math.floor(index / 4)
-      }
-    }));
+    const shuffled1 = this.shuffle([...LEVEL1_CARDS]);
+    const shuffled2 = this.shuffle([...LEVEL2_CARDS]);
+    const shuffled3 = this.shuffle([...LEVEL3_CARDS]);
 
     // 保存牌组
     this.deck1 = shuffled1.slice(4);
