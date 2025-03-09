@@ -70,6 +70,7 @@ export interface RoomState {
   hostId: string;
   status: 'waiting' | 'playing' | 'finished';
   gameState: GameState | null;
+  isLocalMode?: boolean;
 }
 
 export type GameActionType =

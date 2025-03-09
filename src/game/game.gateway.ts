@@ -19,7 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
     methods: ['GET', 'POST']
   },
   pingInterval: 25000,
-  pingTimeout: 10000,
+  pingTimeout: 15000,
   transports: ['websocket', 'polling'],
   allowUpgrades: true,
   cookie: {
@@ -47,27 +47,48 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     for (const [roomId, room] of this.rooms.entries()) {
       const player = room.players.find(p => p.clientId === client.id);
       if (player) {
-        console.log(`Player ${player.name} (${player.id}) disconnected from room ${roomId}`);
+        console.log(`Player ${player.name} (${player.id}) disconnected from room ${roomId}`, {
+          roomStatus: room.status,
+          isLocalMode: room.isLocalMode,
+          playersCount: room.players.length
+        });
 
-        // 如果游戏还没开始，从房间中移除玩家
+        // 如果是本地模式且游戏已经开始，不做任何处理
+        if (room.isLocalMode && room.status === 'playing') {
+          console.log(`Local mode game in progress, ignoring disconnect for player ${player.id}`);
+          return;
+        }
+
+        // 不管游戏是否开始，都先标记为暂时断开
+        player.clientId = undefined;
+        this.server.to(roomId).emit('roomUpdate', room);
+
+        // 设置一个较长的超时时间，如果玩家在这段时间内没有重连，才将其移除
         if (room.status === 'waiting') {
-          room.players = room.players.filter(p => p.clientId !== client.id);
-          if (room.players.length === 0) {
-            this.rooms.delete(roomId);
-            console.log(`Room ${roomId} deleted as no players remaining`);
-          } else {
-            // 如果房主断开连接，选择新的房主
-            if (room.hostId === player.id) {
-              room.hostId = room.players[0].id;
-              console.log(`New host assigned for room ${roomId}: ${room.hostId}`);
+          setTimeout(() => {
+            const currentRoom = this.rooms.get(roomId);
+            if (currentRoom) {
+              // 再次检查是否是本地模式
+              if (currentRoom.isLocalMode) {
+                console.log(`Local mode room, not removing disconnected player ${player.id}`);
+                return;
+              }
+
+              const playerStillDisconnected = currentRoom.players.find(p => p.id === player.id && !p.clientId);
+              if (playerStillDisconnected) {
+                console.log(`Removing disconnected player ${player.id} from room ${roomId}`);
+                currentRoom.players = currentRoom.players.filter(p => p.id !== player.id);
+                if (currentRoom.players.length === 0) {
+                  console.log(`Room ${roomId} is empty, deleting it`);
+                  this.rooms.delete(roomId);
+                } else if (currentRoom.hostId === player.id) {
+                  console.log(`Host ${player.id} disconnected, assigning new host: ${currentRoom.players[0].id}`);
+                  currentRoom.hostId = currentRoom.players[0].id;
+                }
+                this.server.to(roomId).emit('roomUpdate', currentRoom);
+              }
             }
-            this.server.to(roomId).emit('roomUpdate', room);
-          }
-        } else {
-          // 如果游戏已经开始，标记为暂时断开但不移除玩家
-          console.log(`Game in progress, marking player as temporarily disconnected`);
-          player.clientId = undefined;  // 清除clientId，等待重连
-          this.server.to(roomId).emit('roomUpdate', room);
+          }, 30000); // 30秒超时
         }
         break;
       }
@@ -179,10 +200,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('startGame')
   handleStartGame(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string }
+    @MessageBody() data: { roomId: string, isLocalMode?: boolean }
   ) {
     try {
-      console.log('Starting game for room:', data.roomId);
+      console.log('Starting game for room:', data.roomId, 'isLocalMode:', data.isLocalMode);
 
       const room = this.rooms.get(data.roomId);
       if (!room) {
@@ -195,14 +216,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return { success: false, error: 'Need at least 2 players' };
       }
 
-      // 确保所有玩家都在房间中
-      const connectedSockets = this.server.sockets.adapter.rooms.get(data.roomId);
-      if (!connectedSockets || connectedSockets.size !== room.players.length) {
-        console.error('Not all players are connected:', {
-          expected: room.players.length,
-          connected: connectedSockets?.size || 0
-        });
-        return { success: false, error: 'Not all players are connected' };
+      // 单机模式下跳过连接检查
+      if (!data.isLocalMode) {
+        // 确保所有玩家都在房间中
+        const connectedSockets = this.server.sockets.adapter.rooms.get(data.roomId);
+        if (!connectedSockets || connectedSockets.size !== room.players.length) {
+          console.error('Not all players are connected:', {
+            expected: room.players.length,
+            connected: connectedSockets?.size || 0
+          });
+          return { success: false, error: 'Not all players are connected' };
+        }
       }
 
       // 确保是房主在开始游戏
@@ -217,7 +241,21 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 更新房间状态
       room.status = 'playing';
       room.gameState = gameRoom.gameState;
+
+      // 在本地模式下，标记房间为本地模式
+      if (data.isLocalMode) {
+        console.log('Setting room to local mode');
+        room.isLocalMode = true;
+      }
+
       this.rooms.set(data.roomId, room);
+
+      console.log('Room state after initialization:', {
+        id: room.id,
+        status: room.status,
+        isLocalMode: room.isLocalMode,
+        playersCount: room.players.length
+      });
 
       // 将 Map 转换为数组以便于传输
       const gameState = this.convertGameStateForTransport(gameRoom.gameState);
