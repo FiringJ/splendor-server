@@ -139,12 +139,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('joinRoom')
   handleJoinRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomId: string; playerId: string }
+    @MessageBody() data: { roomId: string; playerId: string; isAI?: boolean }
   ) {
     console.log('Player attempting to join room:', {
       clientId: client.id,
       playerId: data.playerId,
-      roomId: data.roomId
+      roomId: data.roomId,
+      isAI: data.isAI
     });
 
     const room = this.rooms.get(data.roomId);
@@ -160,7 +161,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: data.playerId,
         roomId: data.roomId,
         oldClientId: existingPlayer.clientId,
-        newClientId: client.id
+        newClientId: client.id,
+        isAI: existingPlayer.isAI
       });
 
       // 更新玩家的客户端ID
@@ -176,18 +178,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log('New player joining room:', {
       playerId: data.playerId,
       roomId: data.roomId,
-      clientId: client.id
+      clientId: client.id,
+      isAI: data.isAI
     });
 
     const newPlayer = {
       id: data.playerId,
       clientId: client.id,
-      name: `玩家${room.players.length + 1}`,
+      name: data.isAI ? `AI玩家${room.players.length + 1}` : `玩家${room.players.length + 1}`,
       gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
       cards: [],
       reservedCards: [],
       nobles: [],
-      points: 0
+      points: 0,
+      isAI: data.isAI || false
     };
 
     room.players.push(newPlayer);

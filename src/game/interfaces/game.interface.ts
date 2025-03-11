@@ -9,6 +9,7 @@ export interface Player {
   reservedCards: Card[];
   nobles: Noble[];
   points: number;
+  isAI?: boolean; // 是否是AI
 }
 
 export interface Gems {
