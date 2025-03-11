@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { GameAction, RoomState, Player, GameState } from './interfaces/game.interface';
+import { AIService } from './ai.service';
 
 @WebSocketGateway({
   cors: {
@@ -33,7 +34,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private rooms: Map<string, RoomState> = new Map();
 
-  constructor(private readonly gameService: GameService) { }
+  constructor(
+    private readonly gameService: GameService,
+    private readonly aiService: AIService
+  ) { }
 
   handleConnection(client: Socket) {
     console.log(`Client connected: ${client.id}`);
@@ -355,6 +359,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         action: data.action
       });
 
+      // 处理AI玩家的回合
+      setTimeout(() => this.handleAITurn(data.roomId), 1000);
+
       return { success: true };
     } catch (error) {
       console.error('Error processing game action:', error);
@@ -362,6 +369,48 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+    }
+  }
+
+  /**
+   * 处理AI玩家的回合
+   */
+  private async handleAITurn(roomId: string) {
+    try {
+      const room = this.rooms.get(roomId);
+      if (!room || room.status !== 'playing') return;
+
+      const currentPlayerId = room.gameState.currentTurn;
+      const currentPlayer = room.gameState.players.get(currentPlayerId);
+
+      // 检查当前玩家是否是AI
+      if (!currentPlayer || !currentPlayer.isAI) return;
+
+      console.log(`处理AI玩家回合: ${currentPlayer.name} (${currentPlayerId})`);
+
+      // 获取AI的下一步动作
+      const aiAction = this.aiService.getNextAction(room.gameState, currentPlayerId);
+
+      // 执行AI动作
+      const result = this.gameService.handleGameAction(room.gameState, aiAction);
+
+      // 更新房间的游戏状态
+      room.gameState = result;
+      this.rooms.set(roomId, room);
+
+      // 转换状态用于传输
+      const gameStateForTransport = this.convertGameStateForTransport(result);
+
+      // 广播游戏状态更新
+      this.server.to(roomId).emit('gameStateUpdate', {
+        gameState: gameStateForTransport,
+        action: aiAction
+      });
+
+      // 如果下一个玩家也是AI，继续处理
+      setTimeout(() => this.handleAITurn(roomId), 1000);
+    } catch (error) {
+      console.error('处理AI回合出错:', error);
     }
   }
 
