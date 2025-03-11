@@ -10,7 +10,6 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { GameAction, RoomState, Player, GameState } from './interfaces/game.interface';
-import { v4 as uuidv4 } from 'uuid';
 
 @WebSocketGateway({
   cors: {
@@ -100,40 +99,51 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { playerId: string }
   ) {
-    console.log('Creating room for player:', {
+    console.log('Received createRoom request:', {
       clientId: client.id,
       playerId: data.playerId
     });
 
-    const roomId = uuidv4();
-    const room: RoomState = {
-      id: roomId,
-      players: [{
-        id: data.playerId,
-        clientId: client.id,
-        name: `玩家1`,
-        gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
-        cards: [],
-        reservedCards: [],
-        nobles: [],
-        points: 0
-      }],
-      hostId: data.playerId,
-      status: 'waiting',
-      gameState: null
-    };
+    try {
+      // 使用修改后的Service方法创建房间数据
+      const newRoomData = this.gameService.createRoomData(data.playerId);
+      const roomId = newRoomData.id;
 
-    this.rooms.set(roomId, room);
-    client.join(roomId);
+      // 设置房间的客户端ID和主机ID
+      const room: RoomState = {
+        ...newRoomData,
+        hostId: data.playerId,
+        players: newRoomData.players.map(p => ({
+          ...p,
+          clientId: client.id // 设置客户端ID
+        })),
+        isLocalMode: false
+      };
 
-    console.log('Room created:', {
-      roomId,
-      hostId: room.hostId,
-      playerCount: room.players.length
-    });
+      // 在Gateway中保存房间状态
+      this.rooms.set(roomId, room);
 
-    this.server.to(roomId).emit('roomUpdate', room);
-    return { roomId, room };
+      // 将客户端加入Socket.IO房间
+      client.join(roomId);
+
+      console.log('Room created:', {
+        roomId,
+        hostId: room.hostId,
+        playersCount: room.players.length
+      });
+
+      return {
+        success: true,
+        roomId,
+        room: {
+          ...room,
+          id: roomId
+        }
+      };
+    } catch (error) {
+      console.error('Error creating room:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
   }
 
   @SubscribeMessage('joinRoom')
@@ -141,64 +151,78 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { roomId: string; playerId: string; isAI?: boolean }
   ) {
-    console.log('Player attempting to join room:', {
+    console.log('Received joinRoom request:', {
       clientId: client.id,
-      playerId: data.playerId,
       roomId: data.roomId,
+      playerId: data.playerId,
       isAI: data.isAI
     });
 
-    const room = this.rooms.get(data.roomId);
-    if (!room) {
-      console.error('Room not found:', data.roomId);
-      return { success: false, error: 'Room not found' };
-    }
+    try {
+      // 从Gateway的rooms Map中获取房间
+      const room = this.rooms.get(data.roomId);
+      if (!room) {
+        console.error('Room not found:', data.roomId);
+        return { success: false, error: 'Room not found' };
+      }
 
-    // 检查玩家是否已经在房间中
-    const existingPlayer = room.players.find(p => p.id === data.playerId);
-    if (existingPlayer) {
-      console.log('Player rejoining room:', {
-        playerId: data.playerId,
+      if (room.status !== 'waiting') {
+        console.error('Game already started in room:', data.roomId);
+        return { success: false, error: 'Game already started' };
+      }
+
+      // 检查玩家是否已经在房间中
+      if (room.players.some(p => p.id === data.playerId)) {
+        console.error('Player already in room:', {
+          roomId: data.roomId,
+          playerId: data.playerId
+        });
+        return { success: false, error: 'Player already in room' };
+      }
+
+      // 检查房间是否已满
+      if (room.players.length >= 4) {
+        console.error('Room is full:', data.roomId);
+        return { success: false, error: 'Room is full' };
+      }
+
+      // 新玩家的信息
+      const newPlayer = {
+        id: data.playerId,
+        clientId: data.isAI ? null : client.id,
+        name: `玩家${room.players.length + 1}`,
+        gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
+        cards: [],
+        reservedCards: [],
+        nobles: [],
+        points: 0,
+        isAI: !!data.isAI
+      };
+
+      // 更新房间玩家列表
+      room.players.push(newPlayer);
+      this.rooms.set(data.roomId, room);
+
+      // 非AI玩家需要加入Socket.IO房间
+      if (!data.isAI) {
+        client.join(data.roomId);
+      }
+
+      console.log('Player joined room:', {
         roomId: data.roomId,
-        oldClientId: existingPlayer.clientId,
-        newClientId: client.id,
-        isAI: existingPlayer.isAI
+        playerId: data.playerId,
+        isAI: data.isAI,
+        playerCount: room.players.length
       });
 
-      // 更新玩家的客户端ID
-      existingPlayer.clientId = client.id;
-      client.join(data.roomId);
+      // 通知房间内所有玩家
+      this.server.to(data.roomId).emit('roomUpdated', room);
 
-      // 通知房间其他玩家
-      this.server.to(data.roomId).emit('roomUpdate', room);
       return { success: true, room };
+    } catch (error) {
+      console.error('Error joining room:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
-
-    // 新玩家加入
-    console.log('New player joining room:', {
-      playerId: data.playerId,
-      roomId: data.roomId,
-      clientId: client.id,
-      isAI: data.isAI
-    });
-
-    const newPlayer = {
-      id: data.playerId,
-      clientId: client.id,
-      name: data.isAI ? `AI玩家${room.players.length + 1}` : `玩家${room.players.length + 1}`,
-      gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
-      cards: [],
-      reservedCards: [],
-      nobles: [],
-      points: 0,
-      isAI: data.isAI || false
-    };
-
-    room.players.push(newPlayer);
-    client.join(data.roomId);
-
-    this.server.to(data.roomId).emit('roomUpdate', room);
-    return { success: true, room };
   }
 
   @SubscribeMessage('startGame')
@@ -298,33 +322,46 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
 
     try {
-      const room = this.gameService.handleGameAction(data.roomId, data.action);
-      const gameState = this.convertGameStateForTransport(room.gameState);
+      // 从Gateway的rooms Map中获取房间
+      const room = this.rooms.get(data.roomId);
+      if (!room) {
+        console.error('Room not found:', data.roomId);
+        return { success: false, error: 'Room not found' };
+      }
+
+      // 使用Service处理游戏动作，传入当前gameState而非roomId
+      const newGameState = this.gameService.handleGameAction(room.gameState, data.action);
+
+      // 更新房间状态
+      room.gameState = newGameState;
+      this.rooms.set(data.roomId, room);
+
+      // 转换状态用于传输
+      const gameStateForTransport = this.convertGameStateForTransport(newGameState);
 
       console.log('Game action processed successfully:', {
         roomId: data.roomId,
         actionType: data.action.type,
         newGameState: {
-          currentTurn: gameState.currentTurn,
-          players: Array.from(gameState.players.entries()),
+          currentTurn: gameStateForTransport.currentTurn,
+          players: Array.from(gameStateForTransport.players),
           status: room.status
         }
       });
 
+      // 广播游戏状态更新
       this.server.to(data.roomId).emit('gameStateUpdate', {
-        gameState,
-        status: room.status
+        gameState: gameStateForTransport,
+        action: data.action
       });
 
       return { success: true };
     } catch (error) {
-      console.error('Error handling game action:', {
-        roomId: data.roomId,
-        actionType: data.action.type,
-        error: error.message,
-        stack: error.stack
-      });
-      return { success: false, error: error.message };
+      console.error('Error processing game action:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
     }
   }
 

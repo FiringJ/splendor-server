@@ -17,7 +17,6 @@ export class GameError extends Error {
 @Injectable()
 export class GameService {
   private readonly logger = new Logger(GameService.name);
-  private rooms = new Map<string, GameRoom>();
   private deck1: Card[] = [];
   private deck2: Card[] = [];
   private deck3: Card[] = [];
@@ -50,31 +49,22 @@ export class GameService {
         status: 'playing'
       };
 
-      this.rooms.set(room.id, room);
       this.logger.debug(`Game initialized with room ID: ${room.id}`);
       return room;
     } catch (error) {
       this.logger.error('Failed to initialize game', error);
-      throw new GameError('Failed to initialize game', 'INIT_FAILED', { error });
+      throw new GameError('Failed to initialize game', 'INIT_GAME_FAILED', { error });
     }
   }
 
   // 处理游戏动作
-  public handleGameAction(roomId: string, action: GameAction): GameRoom {
+  public handleGameAction(gameState: GameState, action: GameAction): GameState {
     try {
       this.logger.debug('Handling game action:', {
-        roomId,
         actionType: action.type,
         actionDetails: action
       });
 
-      const room = this.rooms.get(roomId);
-      if (!room) {
-        this.logger.error('Room not found:', { roomId });
-        throw new GameError('Room not found', 'ROOM_NOT_FOUND', { roomId });
-      }
-
-      const { gameState } = room;
       let newState = { ...gameState };
 
       // 验证动作合法性
@@ -85,18 +75,21 @@ export class GameService {
 
       this.logger.debug('Action validation passed, processing action...');
 
+      // 使用当前回合玩家ID，如果动作没指定
+      const playerId = 'playerId' in action && action.playerId ? action.playerId : newState.currentTurn;
+
       switch (action.type) {
         case 'TAKE_GEMS':
-          newState = this.handleTakeGems(newState, action.playerId, action.gems);
+          newState = this.handleTakeGems(newState, playerId, action.payload.gems);
           break;
         case 'PURCHASE_CARD':
-          newState = this.handleBuyCard(newState, action.playerId, action.cardId);
+          newState = this.handleBuyCard(newState, playerId, action.payload.cardId);
           break;
         case 'RESERVE_CARD':
-          newState = this.handleReserveCard(newState, action.playerId, action.cardId);
+          newState = this.handleReserveCard(newState, playerId, action.payload.cardId);
           break;
         case 'DISCARD_GEMS':
-          newState = this.handleDiscardGems(newState, action.playerId, action.gems);
+          newState = this.handleDiscardGems(newState, playerId, action.payload.gems);
           break;
         default:
           this.logger.error('Invalid action type:', { action });
@@ -109,55 +102,32 @@ export class GameService {
       // 检查游戏结束条件
       this.checkGameEnd(newState);
 
-      // 更新房间状态
-      room.gameState = newState;
-      this.rooms.set(roomId, room);
+      this.logger.debug('Action handled successfully');
 
-      this.logger.debug('Action handled successfully:', {
-        roomId,
-        actionType: action.type,
-        currentTurn: newState.currentTurn,
-        playerCount: newState.players.size
-      });
-
-      return room;
+      return newState;
     } catch (error) {
-      if (error instanceof GameError) {
-        throw error;
-      }
-      this.logger.error('Failed to handle game action:', {
-        roomId,
-        action,
-        error: error.message,
-        stack: error.stack
-      });
-      throw new GameError(
-        'Failed to handle game action',
-        'ACTION_FAILED',
-        { roomId, action, error }
-      );
+      this.logger.error('Failed to handle game action', error);
+      throw new GameError('Failed to handle game action', 'HANDLE_ACTION_FAILED', { error });
     }
   }
 
   // 处理玩家断开连接
-  public handlePlayerDisconnect(playerId: string): void {
+  public handlePlayerDisconnect(gameState: GameState, playerId: string): GameState {
     try {
-      this.logger.debug(`Handling disconnect for player ${playerId}`);
+      this.logger.debug(`Handling player disconnect: ${playerId}`);
 
-      for (const [roomId, room] of this.rooms.entries()) {
-        if (room.players.some(p => p.id === playerId)) {
-          room.status = 'finished';
-          this.rooms.set(roomId, room);
-          this.logger.debug(`Room ${roomId} marked as finished due to player disconnect`);
-        }
+      // 在这里处理玩家断开连接的逻辑
+      // 例如，可能需要自动传递回合等
+
+      // 如果是当前玩家的回合，自动结束回合
+      if (gameState.currentTurn === playerId) {
+        return this.endTurn(gameState);
       }
+
+      return gameState;
     } catch (error) {
       this.logger.error('Failed to handle player disconnect', error);
-      throw new GameError(
-        'Failed to handle player disconnect',
-        'DISCONNECT_FAILED',
-        { playerId, error }
-      );
+      throw new GameError('Failed to handle player disconnect', 'HANDLE_DISCONNECT_FAILED', { error });
     }
   }
 
@@ -355,48 +325,61 @@ export class GameService {
   }
 
   private checkGameEnd(state: GameState): void {
-    // 检查是否有玩家达到15分
-    const hasPlayerReached15Points = Array.from(state.players.values()).some(player => player.points >= 15);
-
-    if (hasPlayerReached15Points && !state.lastRound) {
-      state.lastRound = true;
-      state.lastRoundStartPlayer = state.currentTurn;
+    // 检查是否有玩家达到15分或以上
+    for (const [playerId, player] of state.players.entries()) {
+      if (player.points >= 15 && !state.lastRound) {
+        // 标记最后一轮开始
+        state.lastRound = true;
+        state.lastRoundStartPlayer = playerId;
+        this.logger.debug(`Player ${playerId} reached 15 points, last round started`);
+        return;
+      }
     }
 
-    // 如果是最后一轮，检查是否所有玩家都进行了最后一次行动
+    // 如果最后一轮已经开始，检查是否回到了开始最后一轮的玩家之前的玩家
     if (state.lastRound && state.lastRoundStartPlayer) {
-      const players = Array.from(state.players.keys());
-      const startPlayerIndex = players.indexOf(state.lastRoundStartPlayer);
-      const currentPlayerIndex = players.indexOf(state.currentTurn);
+      // 计算玩家顺序
+      const playerIds = Array.from(state.players.keys());
+      const currentPlayerIndex = playerIds.indexOf(state.currentTurn);
+      const lastRoundStartPlayerIndex = playerIds.indexOf(state.lastRoundStartPlayer);
 
-      if (currentPlayerIndex === (startPlayerIndex - 1 + players.length) % players.length) {
-        // 找出获胜者
-        let maxPoints = -1;
-        let winner: string | null = null;
+      // 如果当前玩家是开始最后一轮的玩家之前的玩家，游戏结束
+      if (
+        (currentPlayerIndex < lastRoundStartPlayerIndex && currentPlayerIndex === 0) ||
+        currentPlayerIndex === lastRoundStartPlayerIndex
+      ) {
+        // 找出得分最高的玩家
+        let maxPoints = 0;
+        let winnerId: string | null = null;
 
         for (const [playerId, player] of state.players.entries()) {
           if (player.points > maxPoints) {
             maxPoints = player.points;
-            winner = playerId;
-          } else if (player.points === maxPoints && winner) {
-            // 如果分数相同，比较卡牌数量
-            const currentWinnerCards = state.players.get(winner)?.cards.length || 0;
-            if (player.cards.length < currentWinnerCards) {
-              winner = playerId;
+            winnerId = playerId;
+          }
+        }
+
+        // 处理平局情况（卡牌数量少的获胜）
+        if (winnerId) {
+          const playersWithMaxPoints = Array.from(state.players.entries())
+            .filter(([_, p]) => p.points === maxPoints);
+
+          if (playersWithMaxPoints.length > 1) {
+            // 如果有多个玩家得分相同，则拥有卡牌最少的玩家获胜
+            let minCards = Number.MAX_SAFE_INTEGER;
+
+            for (const [pid, p] of playersWithMaxPoints) {
+              const cardCount = p.cards.length;
+              if (cardCount < minCards) {
+                minCards = cardCount;
+                winnerId = pid;
+              }
             }
           }
         }
 
-        state.winner = winner;
-      }
-    }
-
-    // 需要在游戏结束时更新房间状态
-    if (state.winner) {
-      const room = Array.from(this.rooms.values())
-        .find(r => r.gameState === state);
-      if (room) {
-        room.status = 'finished';
+        state.winner = winnerId;
+        this.logger.debug(`Game ended, winner: ${winnerId}`);
       }
     }
   }
@@ -556,28 +539,64 @@ export class GameService {
 
   // 验证动作合法性
   private validateAction(state: GameState, action: GameAction): boolean {
-    // 检查游戏是否已结束
-    if (state.winner !== null) {
-      throw new Error('Game is already finished');
+    if (!state || !action) return false;
+
+    // 确保当前有玩家回合
+    if (!state.currentTurn) {
+      this.logger.error('No current turn defined in game state');
+      return false;
     }
 
-    // START_GAME 动作不需要验证玩家回合
-    if (action.type === 'START_GAME') {
-      return true;
-    }
+    // 为action添加playerId如果不存在
+    // 如果action没有指定playerId，使用当前回合的玩家ID
+    const playerId = 'playerId' in action && action.playerId ? action.playerId : state.currentTurn;
 
-    // 检查是否是玩家的回合
-    if (!this.validateTurn(state, action.playerId)) {
-      throw new Error('Not your turn');
-    }
+    // 验证动作类型和必要的属性
+    switch (action.type) {
+      case 'TAKE_GEMS':
+        // 检查gems是否在payload中
+        if (!action.payload || !action.payload.gems) {
+          this.logger.error('TAKE_GEMS action missing gems in payload', { action });
+          return false;
+        }
+        if (!this.validateTurn(state, playerId)) {
+          this.logger.error('Not player turn', { currentTurn: state.currentTurn, playerId });
+          return false;
+        }
+        return this.canTakeGems(action.payload.gems, state);
 
-    // 检查玩家是否存在
-    const player = state.players.get(action.playerId);
-    if (!player) {
-      throw new Error('Player not found');
-    }
+      case 'PURCHASE_CARD':
+        if (!action.payload || !('cardId' in action.payload)) {
+          this.logger.error('PURCHASE_CARD action missing cardId in payload', { action });
+          return false;
+        }
+        if (!this.validateTurn(state, playerId)) return false;
+        const card = this.findCard(state, action.payload.cardId);
+        if (!card) return false;
+        const player = state.players.get(playerId);
+        return player ? this.canPurchaseCard(card, player) : false;
 
-    return true;
+      case 'RESERVE_CARD':
+        if (!action.payload || !('cardId' in action.payload)) {
+          this.logger.error('RESERVE_CARD action missing cardId in payload', { action });
+          return false;
+        }
+        if (!this.validateTurn(state, playerId)) return false;
+        const playerForReserve = state.players.get(playerId);
+        return playerForReserve ? this.canReserveCard(playerForReserve) : false;
+
+      case 'DISCARD_GEMS':
+        if (!action.payload || !('gems' in action.payload)) {
+          this.logger.error('DISCARD_GEMS action missing gems in payload', { action });
+          return false;
+        }
+        if (!this.validateTurn(state, playerId)) return false;
+        return true; // 丢弃宝石的检查在处理函数中执行
+
+      default:
+        this.logger.error('Unknown action type', { actionType: action.type });
+        return false;
+    }
   }
 
   // 验证是否是玩家的回合
@@ -586,30 +605,22 @@ export class GameService {
   }
 
   // 状态恢复相关方法
-  public restoreGameState(roomId: string): GameRoom | undefined {
-    const room = this.rooms.get(roomId);
-    if (!room) return undefined;
-
+  public replayGameState(actions: GameAction[], players: Player[]): GameState {
     // 从动作历史重建游戏状态
-    const newState = this.replayActions(room.gameState.actions, room.players);
-    room.gameState = newState;
-    return room;
+    return this.replayActions(actions, players);
   }
 
   private replayActions(actions: GameAction[], players: Player[]): GameState {
     // 创建初始状态
     const initialState: GameState = {
-      players: new Map(players.map(p => [p.id, {
-        ...p,
-        gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
-        cards: [],
-        reservedCards: [],
-        nobles: [],
-        points: 0
-      }])),
+      players: new Map(players.map(p => [p.id, { ...p }])),
       currentTurn: players[0].id,
       gems: this.getInitialGems(players.length),
-      cards: this.generateInitialCards(),
+      cards: {
+        level1: this.generateInitialCards().level1,
+        level2: this.generateInitialCards().level2,
+        level3: this.generateInitialCards().level3
+      },
       nobles: this.generateNobles(players.length + 1),
       winner: null,
       lastRound: false,
@@ -618,38 +629,40 @@ export class GameService {
     };
 
     // 重放所有动作
-    return actions.reduce((state, action) => {
-      let newState = { ...state };
-
-      try {
-        switch (action.type) {
-          case 'TAKE_GEMS':
-            newState = this.handleTakeGems(newState, action.playerId, action.gems);
-            break;
-          case 'PURCHASE_CARD':
-            newState = this.handleBuyCard(newState, action.playerId, action.cardId);
-            break;
-          case 'RESERVE_CARD':
-            newState = this.handleReserveCard(newState, action.playerId, action.cardId);
-            break;
-          case 'START_GAME':
-            // START_GAME 动作不需要特殊处理，因为已经在初始状态中设置
-            break;
-        }
-
-        // 记录动作
-        newState.actions = [...newState.actions, action];
-
-        return newState;
-      } catch (error) {
-        console.error(`Failed to replay action: ${error.message}`, action);
-        return state;
+    let currentState = initialState;
+    for (const action of actions) {
+      // 跳过无效动作
+      if (!this.validateAction(currentState, action)) {
+        this.logger.warn('Skipping invalid action during replay', { action });
+        continue;
       }
-    }, initialState);
+
+      const playerId = 'playerId' in action && action.playerId ? action.playerId : currentState.currentTurn;
+
+      switch (action.type) {
+        case 'TAKE_GEMS':
+          currentState = this.handleTakeGems(currentState, playerId, action.payload.gems);
+          break;
+        case 'PURCHASE_CARD':
+          currentState = this.handleBuyCard(currentState, playerId, action.payload.cardId);
+          break;
+        case 'RESERVE_CARD':
+          currentState = this.handleReserveCard(currentState, playerId, action.payload.cardId);
+          break;
+        case 'DISCARD_GEMS':
+          currentState = this.handleDiscardGems(currentState, playerId, action.payload.gems);
+          break;
+      }
+
+      // 记录动作
+      currentState.actions.push(action);
+    }
+
+    return currentState;
   }
 
-  // 创建房间
-  public createRoom(playerId: string): string {
+  // 游戏房间创建/加入方法
+  public createRoomData(playerId: string): GameRoom {
     try {
       const roomId = uuidv4();
       const room: GameRoom = {
@@ -667,56 +680,11 @@ export class GameService {
         gameState: null
       };
 
-      this.rooms.set(roomId, room);
-      this.logger.debug(`Room created: ${roomId}`);
-      return roomId;
-    } catch (error) {
-      this.logger.error('Failed to create room', error);
-      throw new GameError('Failed to create room', 'CREATE_ROOM_FAILED', { error });
-    }
-  }
-
-  // 加入房间
-  public joinRoom(roomId: string, playerId: string): GameRoom {
-    try {
-      const room = this.rooms.get(roomId);
-      if (!room) {
-        throw new GameError('Room not found', 'ROOM_NOT_FOUND', { roomId });
-      }
-
-      if (room.status !== 'waiting') {
-        throw new GameError('Game already started', 'GAME_STARTED', { roomId });
-      }
-
-      // 检查玩家是否已经在房间中
-      if (room.players.some(p => p.id === playerId)) {
-        throw new GameError('Player already in room', 'PLAYER_EXISTS', { roomId, playerId });
-      }
-
-      // 检查房间是否已满
-      if (room.players.length >= 4) {
-        throw new GameError('Room is full', 'ROOM_FULL', { roomId });
-      }
-
-      const newPlayer = {
-        id: playerId,
-        name: `玩家${room.players.length + 1}`,
-        gems: { diamond: 0, sapphire: 0, emerald: 0, ruby: 0, onyx: 0, gold: 0 },
-        cards: [],
-        reservedCards: [],
-        nobles: [],
-        points: 0
-      };
-
-      room.players.push(newPlayer);
-      this.logger.debug(`Player ${playerId} joined room ${roomId}`);
+      this.logger.debug(`Room data created: ${roomId}`);
       return room;
     } catch (error) {
-      this.logger.error('Failed to join room', error);
-      if (error instanceof GameError) {
-        throw error;
-      }
-      throw new GameError('Failed to join room', 'JOIN_ROOM_FAILED', { error });
+      this.logger.error('Failed to create room data', error);
+      throw new GameError('Failed to create room data', 'CREATE_ROOM_FAILED', { error });
     }
   }
 } 

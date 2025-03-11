@@ -83,19 +83,43 @@ export type GameActionType =
 
 export interface TakeGemsAction {
   type: 'TAKE_GEMS';
-  playerId: string;
-  gems: Partial<Record<GemType, number>>;
+  playerId?: string; // 可选，如果不存在则使用当前回合的玩家
+  payload: {
+    gems: Partial<Record<GemType, number>>;
+  };
+}
+
+export interface PurchaseCardAction {
+  type: 'PURCHASE_CARD';
+  playerId?: string;
+  payload: {
+    cardId: number;
+  };
+}
+
+export interface ReserveCardAction {
+  type: 'RESERVE_CARD';
+  playerId?: string;
+  payload: {
+    cardId: number;
+  };
 }
 
 export interface DiscardGemsAction {
   type: 'DISCARD_GEMS';
-  playerId: string;
-  gems: Partial<Record<GemType, number>>;
+  playerId?: string;
+  payload: {
+    gems: Partial<Record<GemType, number>>;
+  };
+}
+
+export interface StartGameAction {
+  type: 'START_GAME';
 }
 
 export type GameAction =
   | TakeGemsAction
-  | { type: 'PURCHASE_CARD'; cardId: number; playerId: string }
-  | { type: 'RESERVE_CARD'; cardId: number; playerId: string }
-  | { type: 'START_GAME'; }
-  | DiscardGemsAction; 
+  | PurchaseCardAction
+  | ReserveCardAction
+  | DiscardGemsAction
+  | StartGameAction; 
