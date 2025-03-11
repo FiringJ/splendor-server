@@ -307,23 +307,7 @@ export class AIService {
    * 检查玩家是否可以购买卡牌
    */
   private canPurchaseCard(card: Card, player: Player): boolean {
-    // 计算玩家拥有的宝石卡牌数量
-    const cardsByGemType = this.countCardsByGemType(player);
-
-    for (const [gemType, cost] of Object.entries(card.cost)) {
-      const typedGemType = gemType as GemType;
-      // 玩家可用的宝石 = 拥有的宝石 + 相同类型的卡牌数量
-      const available = (player.gems[typedGemType] || 0) + (cardsByGemType[typedGemType] || 0);
-      const shortfall = (cost as number) - available;
-
-      if (shortfall > 0) {
-        // 检查是否有足够的金币补足不足
-        if ((player.gems.gold || 0) < shortfall) {
-          return false;
-        }
-      }
-    }
-
-    return true;
+    // 直接使用游戏服务的canPurchaseCard方法，确保判断逻辑一致
+    return this.gameService.canPurchaseCard(card, player);
   }
 } 

@@ -417,7 +417,7 @@ export class GameService {
     return false;
   }
 
-  private canPurchaseCard(card: Card, player: Player): boolean {
+  public canPurchaseCard(card: Card, player: Player): boolean {
     // 计算玩家拥有的资源（包括卡牌提供的永久宝石）
     const cardBonuses = player.cards.reduce((acc, c) => {
       acc[c.gem] = (acc[c.gem] || 0) + 1;
