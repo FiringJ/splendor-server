@@ -14,8 +14,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "/api/game",
-      "runtime": "edge"
+      "dest": "/api/game"
     }
   ]
 }
