@@ -10,6 +10,7 @@ export class SocketIoAdapter extends IoAdapter {
         methods: ['GET', 'POST'],
         credentials: true,
       },
+      transports: ['websocket'], // 仅允许 WebSocket 传输
     });
     return server;
   }
