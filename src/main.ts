@@ -17,6 +17,7 @@ async function bootstrap() {
   // 使用自定义 Socket.io 适配器（覆盖默认 WebSocket 配置）
   app.useWebSocketAdapter(new SocketIoAdapter(app));
 
-  await app.listen(3001);
+  const port = process.env.PORT || 3001;
+  await app.listen(port);
 }
 bootstrap();
