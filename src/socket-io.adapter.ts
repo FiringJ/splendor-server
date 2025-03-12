@@ -7,10 +7,9 @@ export class SocketIoAdapter extends IoAdapter {
       ...options,
       cors: {
         origin: ['https://www.splendor.uno', 'http://localhost:3000'],
-        methods: ['GET', 'POST'],
+        methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
-      },
-      transports: ['websocket'], // 仅允许 WebSocket 传输
+      }
     });
     return server;
   }
