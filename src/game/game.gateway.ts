@@ -220,7 +220,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       // 通知房间内所有玩家
-      this.server.to(data.roomId).emit('roomUpdated', room);
+      this.server.to(data.roomId).emit('roomUpdate', room);
 
       return { success: true, room };
     } catch (error) {
