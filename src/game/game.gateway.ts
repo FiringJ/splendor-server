@@ -29,6 +29,13 @@ import { AIService } from './ai.service';
     path: '/'
   }
 })
+@WebSocketGateway({
+  path: '/socket.io', // 明确指定路径
+  cors: {
+    origin: 'https://www.splendor.uno', 
+    methods: ['GET', 'POST', 'OPTIONS']
+  }
+})
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;

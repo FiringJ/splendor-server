@@ -18,5 +18,24 @@
         "PATCH"
       ]
     }
+  ],
+  "headers": [
+    {
+      "source": "/socket.io/(.*)",
+      "headers": [
+        { 
+          "key": "Access-Control-Allow-Origin", 
+          "value": "https://www.splendor.uno" 
+        },
+        { 
+          "key": "Access-Control-Allow-Methods", 
+          "value": "GET,POST,OPTIONS" 
+        },
+        { 
+          "key": "Access-Control-Allow-Headers", 
+          "value": "Sec-WebSocket-Protocol,Authorization" 
+        }
+      ]
+    }
   ]
 }
