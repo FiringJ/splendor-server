@@ -13,27 +13,18 @@ import { GameAction, RoomState, Player, GameState } from './interfaces/game.inte
 import { AIService } from './ai.service';
 
 @WebSocketGateway({
+  path: '/socket.io', // 必须与客户端连接路径完全一致
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001', 'https://www.splendor.uno'],
-    credentials: true,
+    origin: ['https://www.splendor.uno', 'http://localhost:3000'],
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Authorization']
+    allowedHeaders: ['Authorization', 'Sec-WebSocket-Protocol'],
+    credentials: true
   },
-  pingInterval: 25000,
-  pingTimeout: 15000,
-  transports: ['websocket', 'polling'],
-  allowUpgrades: true,
+  transports: ['websocket', 'polling'], // 必须保留传输模式
   cookie: {
     name: 'io',
     httpOnly: true,
     path: '/'
-  }
-})
-@WebSocketGateway({
-  path: '/socket.io', // 明确指定路径
-  cors: {
-    origin: 'https://www.splendor.uno', 
-    methods: ['GET', 'POST', 'OPTIONS']
   }
 })
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
