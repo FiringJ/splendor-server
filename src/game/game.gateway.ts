@@ -14,9 +14,10 @@ import { AIService } from './ai.service';
 
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: ['http://localhost:3000', 'http://localhost:3001', 'https://www.splendor.uno'],
     credentials: true,
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Authorization']
   },
   pingInterval: 25000,
   pingTimeout: 15000,
