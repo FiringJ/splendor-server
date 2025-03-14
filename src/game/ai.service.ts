@@ -19,6 +19,12 @@ export class AIService {
       throw new Error('AI玩家未找到');
     }
 
+    // ===== 游戏阶段判断 =====
+    const isEarlyGame = player.cards.length < 2;
+    const isMidGame = player.cards.length >= 2 && player.cards.length < 5;
+    const isLateGame = player.points >= 10 || player.cards.length >= 5;
+    this.logger.debug(`游戏阶段: ${isEarlyGame ? '早期' : isMidGame ? '中期' : '后期'}`);
+
     // ===== 获取基本游戏信息 =====
     const availableNobles = this.findAvailableNobles(gameState);
     const possibleCards = [
@@ -44,6 +50,7 @@ export class AIService {
           return score > best.score ? { card, score } : best;
         }, { card: purchasableNobleCards[0], score: -Infinity });
 
+        this.logger.debug(`选择购买贵族目标卡牌: ${bestNobleCard.card.id}, 评分: ${bestNobleCard.score}`);
         return {
           type: 'PURCHASE_CARD',
           playerId: player.id,
@@ -68,6 +75,7 @@ export class AIService {
 
       // 按得分排序，选择得分最高的卡牌
       scoredCards.sort((a, b) => b.score - a.score);
+      this.logger.debug(`最佳购买卡牌评分: ${scoredCards[0].score}, ID: ${scoredCards[0].card.id}`);
 
       return {
         type: 'PURCHASE_CARD',
@@ -78,7 +86,12 @@ export class AIService {
       };
     }
 
-    // ===== 策略3: 考虑预定高价值卡牌 =====
+    // ===== 评估选择宝石的价值 =====
+    const selectedGems = this.selectGemsStrategically(gameState, player, nobleTargets);
+    const gemSelectionValue = this.evaluateGemSelectionValue(gameState, player, nobleTargets, selectedGems);
+    this.logger.debug(`选择宝石的评估价值: ${gemSelectionValue}`);
+
+    // ===== 策略3: 考虑预定高价值卡牌 vs 选择宝石 =====
     if (player.reservedCards.length < 3) {
       // 首先计算玩家距离获取各个贵族还需要哪些宝石卡
       const nobleStrategies = this.getNobleStrategies(gameState, player);
@@ -103,13 +116,16 @@ export class AIService {
 
         this.logger.debug(`最佳预留卡牌评分: ${bestReservation.score}, ID: ${bestReservation.card.id}, 等级: ${bestReservation.card.level}`);
 
-        // 降低预留阈值，只有在卡牌分数很低时才不考虑预留
-        // 游戏初期更偏向于获取宝石而不是预留卡牌
-        const shouldReserveThreshold = player.cards.length < 2 ? 7 : 4;
+        // 设置预留阈值，根据游戏阶段和已预留卡牌数量调整
+        let reserveThreshold = isEarlyGame ? 8 : isMidGame ? 5 : 3;
+        // 已有预留卡越多，预留新卡的阈值越高
+        reserveThreshold += player.reservedCards.length * 1.5;
 
-        // 如果最佳卡牌的预留价值高于阈值，就预留它
-        if (bestReservation.score > shouldReserveThreshold) {
-          this.logger.debug(`决定预留特定卡牌: ${bestReservation.card.id}`);
+        this.logger.debug(`预留卡牌阈值: ${reserveThreshold}, 已预留卡牌数: ${player.reservedCards.length}`);
+
+        // 比较预留卡牌和选择宝石的价值
+        if (bestReservation.score > gemSelectionValue && bestReservation.score > reserveThreshold) {
+          this.logger.debug(`决定预留特定卡牌: ${bestReservation.card.id}, 预留评分(${bestReservation.score}) > 宝石评分(${gemSelectionValue})`);
           return {
             type: 'RESERVE_CARD',
             playerId: player.id,
@@ -118,10 +134,15 @@ export class AIService {
             }
           };
         }
-        // 只有在没有高价值特定卡牌时，才考虑从牌堆预留
-        else if (gameState.cards.deck3.length > 0 && player.gems.gold < 3 && player.cards.length >= 2) {
-          // 只有在不是游戏初期时才考虑从牌堆预留
-          this.logger.debug(`决定从牌堆预留卡牌`);
+        // 考虑从牌堆预留，条件更严格
+        else if (
+          gameState.cards.deck3.length > 0 &&
+          player.gems.gold < 3 &&
+          !isEarlyGame &&
+          gemSelectionValue < 4 &&
+          player.reservedCards.length < 2  // 最多只从牌堆预留1张，保留灵活性
+        ) {
+          this.logger.debug(`决定从牌堆预留卡牌, 宝石评分较低: ${gemSelectionValue}`);
           return {
             type: 'RESERVE_CARD',
             playerId: player.id,
@@ -131,12 +152,16 @@ export class AIService {
             }
           };
         }
+        // 其他情况选择宝石
+        else {
+          this.logger.debug(`选择拿取宝石而非预留卡牌, 宝石评分(${gemSelectionValue}) >= 预留评分(${bestReservation.score}) 或 预留评分低于阈值(${reserveThreshold})`);
+        }
       }
     }
 
     // ===== 策略4: 选择宝石 =====
-    const selectedGems = this.selectGemsStrategically(gameState, player, nobleTargets);
     if (Object.keys(selectedGems).length > 0) {
+      this.logger.debug(`执行选择宝石策略: ${JSON.stringify(selectedGems)}`);
       return {
         type: 'TAKE_GEMS',
         playerId: player.id,
@@ -147,6 +172,7 @@ export class AIService {
     }
 
     // 如果其他操作都不可行，返回默认的宝石选择策略
+    this.logger.debug(`执行默认宝石选择策略`);
     return this.getDefaultGemSelection(gameState, player);
   }
 
@@ -645,6 +671,110 @@ export class AIService {
    */
   private getCurrentGemCount(player: Player): number {
     return Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
+  }
+
+  /**
+   * 评估选择宝石的价值
+   * 考虑多种因素来确定当前选择宝石的价值有多高
+   */
+  private evaluateGemSelectionValue(
+    gameState: GameState,
+    player: Player,
+    nobleTargets: NobleTarget[],
+    selectedGems: Partial<Record<GemType, number>>
+  ): number {
+    // 基础分值
+    let value = 5; // 选择宝石的基础价值
+
+    // 游戏阶段因素
+    const isEarlyGame = player.cards.length < 2;
+    const isMidGame = player.cards.length >= 2 && player.cards.length < 5;
+
+    // 早期阶段选择宝石更有价值
+    if (isEarlyGame) {
+      value += 3;
+      this.logger.debug(`游戏早期，选择宝石价值增加: +3`);
+    }
+
+    // 宝石数量因素
+    const gemCount = Object.values(selectedGems).reduce((sum, count) => sum + count, 0);
+    value += gemCount * 0.8; // 能拿到的宝石越多越好
+    this.logger.debug(`可选宝石数量(${gemCount})加分: +${gemCount * 0.8}`);
+
+    // 考虑宝石对购买预留卡的价值
+    if (player.reservedCards.length > 0) {
+      let reservedCardBenefit = 0;
+
+      for (const card of player.reservedCards) {
+        // 计算这些宝石能减少购买预留卡所需的回合数
+        let benefitForCard = 0;
+        for (const [gemType, count] of Object.entries(selectedGems)) {
+          const required = card.cost[gemType as GemType] || 0;
+          const playerHas = player.gems[gemType as GemType] || 0;
+
+          if (required > playerHas) {
+            // 如果这种宝石是预留卡所需的
+            benefitForCard += Math.min(count, required - playerHas) * 1.2;
+          }
+        }
+        reservedCardBenefit = Math.max(reservedCardBenefit, benefitForCard);
+      }
+
+      value += reservedCardBenefit;
+      this.logger.debug(`宝石对购买预留卡的价值加分: +${reservedCardBenefit}`);
+    }
+
+    // 考虑宝石对接近贵族的价值
+    if (nobleTargets.length > 0) {
+      let nobleBenefit = 0;
+
+      for (const target of nobleTargets) {
+        // 找出购买贵族所需的关键卡牌，看这些宝石是否有助于购买
+        const cardsToNoble = [
+          ...gameState.cards.level1,
+          ...gameState.cards.level2,
+          ...gameState.cards.level3
+        ].filter(card => target.neededGems.includes(card.gem));
+
+        for (const card of cardsToNoble) {
+          let benefitForCard = 0;
+          for (const [gemType, count] of Object.entries(selectedGems)) {
+            const required = card.cost[gemType as GemType] || 0;
+            const playerHas = player.gems[gemType as GemType] || 0;
+
+            if (required > playerHas) {
+              // 如果这种宝石是贵族卡所需的
+              benefitForCard += Math.min(count, required - playerHas) * target.completionPercentage;
+            }
+          }
+          nobleBenefit += benefitForCard;
+        }
+      }
+
+      value += nobleBenefit;
+      this.logger.debug(`宝石对接近贵族的价值加分: +${nobleBenefit}`);
+    }
+
+    // 考虑宝石的稀缺性
+    for (const [gemType, count] of Object.entries(selectedGems)) {
+      const availableInGame = gameState.gems[gemType as GemType] || 0;
+      // 剩余量少的宝石价值更高
+      const scarcityBonus = 4 - Math.min(4, availableInGame - count);
+      if (scarcityBonus > 0) {
+        value += scarcityBonus * 0.4;
+        this.logger.debug(`宝石稀缺性(${gemType})加分: +${scarcityBonus * 0.4}`);
+      }
+    }
+
+    // 如果玩家宝石接近上限，价值降低
+    const currentGemCount = this.getCurrentGemCount(player);
+    const gemCapacityPenalty = Math.max(0, currentGemCount + gemCount - 8) * 2;
+    if (gemCapacityPenalty > 0) {
+      value -= gemCapacityPenalty;
+      this.logger.debug(`宝石接近上限惩罚: -${gemCapacityPenalty}`);
+    }
+
+    return value;
   }
 }
 
