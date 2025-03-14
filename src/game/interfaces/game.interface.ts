@@ -50,6 +50,9 @@ export interface GameState {
     level1: Card[];
     level2: Card[];
     level3: Card[];
+    deck1: Card[];
+    deck2: Card[];
+    deck3: Card[];
   };
   nobles: Noble[];
   winner: string | null;
@@ -102,6 +105,7 @@ export interface ReserveCardAction {
   playerId?: string;
   payload: {
     cardId: number;
+    level?: number; // 当从牌堆预留时，需要指定牌堆等级
   };
 }
 

@@ -26,14 +26,19 @@ export class GameService {
     try {
       this.logger.debug(`Initializing game for ${players.length} players`);
 
+      // 确保每次初始化时，所有卡牌集合都是全新的
+      const initialCards = this.generateInitialCards();
       const gameState: GameState = {
         players: new Map(players.map(p => [p.id, p])),
         currentTurn: players[0].id,
         gems: this.getInitialGems(players.length),
         cards: {
-          level1: this.generateInitialCards().level1,
-          level2: this.generateInitialCards().level2,
-          level3: this.generateInitialCards().level3
+          level1: initialCards.level1,
+          level2: initialCards.level2,
+          level3: initialCards.level3,
+          deck1: initialCards.deck1,
+          deck2: initialCards.deck2,
+          deck3: initialCards.deck3
         },
         nobles: this.generateNobles(players.length + 1),
         winner: null,
@@ -86,7 +91,8 @@ export class GameService {
           newState = this.handleBuyCard(newState, playerId, action.payload.cardId);
           break;
         case 'RESERVE_CARD':
-          newState = this.handleReserveCard(newState, playerId, action.payload.cardId);
+          // 传递level参数，以支持从牌堆预留卡牌
+          newState = this.handleReserveCard(newState, playerId, action.payload.cardId, action.payload.level);
           break;
         case 'DISCARD_GEMS':
           newState = this.handleDiscardGems(newState, playerId, action.payload.gems);
@@ -194,7 +200,7 @@ export class GameService {
   }
 
   // 私有方法：处理预留卡牌
-  private handleReserveCard(state: GameState, playerId: string, cardId: number): GameState {
+  private handleReserveCard(state: GameState, playerId: string, cardId: number, level?: number): GameState {
     const newState = { ...state };
     const player = newState.players.get(playerId);
     if (!player) throw new Error('Player not found');
@@ -203,9 +209,32 @@ export class GameService {
       throw new Error('Cannot reserve more cards');
     }
 
-    // 查找卡牌
-    const card = this.findCard(newState, cardId);
-    if (!card) throw new Error('Card not found');
+    let card: Card | undefined;
+
+    // 处理从牌堆顶部预留卡牌的情况
+    if (cardId === -1 && level) {
+      // 确定牌堆
+      const deckKey = `deck${level}` as keyof typeof this;
+      const deck = this[deckKey] as Card[];
+
+      if (deck.length === 0) {
+        throw new Error(`No cards left in level ${level} deck`);
+      }
+
+      // 从牌堆中取出顶部卡牌
+      card = deck.pop();
+
+      // 更新前端显示的牌堆信息
+      const deckDisplayKey = `deck${level}` as keyof typeof state.cards;
+      state.cards[deckDisplayKey] = deck.map(c => ({ ...c, isCardBack: true }));
+    } else {
+      // 从展示区域预留可见卡牌
+      card = this.findCard(newState, cardId);
+      if (!card) throw new Error('Card not found');
+
+      // 从展示区移除卡牌并补充
+      this.removeAndReplenishCard(newState, card);
+    }
 
     // 预留卡牌
     player.reservedCards.push(card);
@@ -215,9 +244,6 @@ export class GameService {
       newState.gems.gold--;
       player.gems.gold = (player.gems.gold || 0) + 1;
     }
-
-    // 从展示区移除卡牌并补充
-    this.removeAndReplenishCard(newState, card);
 
     return this.endTurn(newState);
   }
@@ -286,19 +312,54 @@ export class GameService {
       return newArray;
     };
 
-    const shuffled1 = shuffleArray([...LEVEL1_CARDS]);
-    const shuffled2 = shuffleArray([...LEVEL2_CARDS]);
-    const shuffled3 = shuffleArray([...LEVEL3_CARDS]);
+    // 创建全新副本并洗牌，避免引用原始数组
+    const level1Cards = shuffleArray([...LEVEL1_CARDS]);
+    const level2Cards = shuffleArray([...LEVEL2_CARDS]);
+    const level3Cards = shuffleArray([...LEVEL3_CARDS]);
 
-    this.deck1 = shuffled1.slice(4);
-    this.deck2 = shuffled2.slice(4);
-    this.deck3 = shuffled3.slice(4);
+    // 明确分离展示区和牌堆卡牌
+    const display1 = level1Cards.slice(0, 4);
+    const display2 = level2Cards.slice(0, 4);
+    const display3 = level3Cards.slice(0, 4);
+
+    // 将剩余卡牌放入牌堆
+    this.deck1 = level1Cards.slice(4);
+    this.deck2 = level2Cards.slice(4);
+    this.deck3 = level3Cards.slice(4);
+
+    // 检查并确保所有卡牌ID唯一
+    this.validateUniqueCardIds(display1, display2, display3, this.deck1, this.deck2, this.deck3);
 
     return {
-      level1: shuffled1.slice(0, 4),
-      level2: shuffled2.slice(0, 4),
-      level3: shuffled3.slice(0, 4)
+      level1: display1,
+      level2: display2,
+      level3: display3,
+      // 添加牌堆数量信息，用于前端展示
+      deck1: this.deck1.map(card => ({ ...card, isCardBack: true })),
+      deck2: this.deck2.map(card => ({ ...card, isCardBack: true })),
+      deck3: this.deck3.map(card => ({ ...card, isCardBack: true }))
     };
+  }
+
+  // 验证所有卡牌ID唯一
+  private validateUniqueCardIds(...cardArrays: Card[][]) {
+    const allCardIds = new Set<number>();
+    let hasDuplicate = false;
+
+    for (const cardArray of cardArrays) {
+      for (const card of cardArray) {
+        if (allCardIds.has(card.id)) {
+          this.logger.error(`发现重复卡牌ID: ${card.id}`);
+          hasDuplicate = true;
+        } else {
+          allCardIds.add(card.id);
+        }
+      }
+    }
+
+    if (hasDuplicate) {
+      this.logger.error('卡牌初始化存在重复ID，这可能导致游戏中卡牌重复问题');
+    }
   }
 
   private generateNobles(count: number): Noble[] {
@@ -504,12 +565,23 @@ export class GameService {
 
     // 从展示区移除并补充
     const level = `level${card.level}` as keyof typeof state.cards;
-    const deck = this[`deck${card.level}`] as Card[];
+    const deckKey = `deck${card.level}` as keyof typeof this;
+    const deck = this[deckKey] as Card[];
 
+    // 从展示区移除当前卡牌
     state.cards[level] = state.cards[level].filter(c => c.id !== card.id);
 
+    // 如果牌堆还有卡牌，则补充
     if (deck.length > 0) {
-      state.cards[level].push(deck.pop()!);
+      // 直接取出牌堆顶卡牌
+      const newCard = deck.pop()!;
+
+      // 添加到展示区
+      state.cards[level].push(newCard);
+
+      // 更新前端显示的牌堆信息
+      const deckDisplayKey = `deck${card.level}` as keyof typeof state.cards;
+      state.cards[deckDisplayKey] = deck.map(card => ({ ...card, isCardBack: true }));
     }
   }
 
@@ -612,14 +684,18 @@ export class GameService {
 
   private replayActions(actions: GameAction[], players: Player[]): GameState {
     // 创建初始状态
+    const initialCards = this.generateInitialCards();
     const initialState: GameState = {
       players: new Map(players.map(p => [p.id, { ...p }])),
       currentTurn: players[0].id,
       gems: this.getInitialGems(players.length),
       cards: {
-        level1: this.generateInitialCards().level1,
-        level2: this.generateInitialCards().level2,
-        level3: this.generateInitialCards().level3
+        level1: initialCards.level1,
+        level2: initialCards.level2,
+        level3: initialCards.level3,
+        deck1: initialCards.deck1,
+        deck2: initialCards.deck2,
+        deck3: initialCards.deck3
       },
       nobles: this.generateNobles(players.length + 1),
       winner: null,
