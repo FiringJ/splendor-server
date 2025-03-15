@@ -159,13 +159,18 @@ export class GameService {
     // 检查玩家宝石总数是否超过10个
     const totalGems = Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
     if (totalGems > 10) {
-      throw new GameError(
-        'Player must discard gems to have 10 or fewer',
-        'GEMS_OVERFLOW',
-        { currentTotal: totalGems, playerId }
-      );
+      // 不立即抛出错误，而是标记需要丢弃的宝石
+      // 但不结束回合，等待玩家丢弃宝石
+      return {
+        ...newState,
+        pendingDiscard: {
+          playerId,
+          gemsCount: totalGems - 10
+        }
+      };
     }
 
+    // 如果没有溢出，正常结束回合
     return this.endTurn(newState);
   }
 
@@ -287,7 +292,11 @@ export class GameService {
       newState.gems[type] = (newState.gems[type] || 0) + count;
     });
 
-    return newState;
+    // 清除pendingDiscard状态
+    delete newState.pendingDiscard;
+
+    // 结束当前玩家回合，进入下一个玩家
+    return this.endTurn(newState);
   }
 
   // 私有方法：游戏辅助函数
@@ -450,8 +459,10 @@ export class GameService {
     // 禁止选择黄金
     if (selectedGems.gold) return false;
 
-    const differentColors = Object.keys(selectedGems).length;
+    const differentColors = Object.entries(selectedGems).filter(([_, count]) => count && count > 0).length;
     const sameColorCount = Math.max(...Object.values(selectedGems).map(v => v || 0));
+
+    if (differentColors === 0) return false; // 至少要选择一种宝石
 
     // 检查是否有足够的宝石可以拿
     for (const [type, count] of Object.entries(selectedGems) as [GemType, number][]) {
@@ -466,7 +477,7 @@ export class GameService {
       return (state.gems[gemType as GemType] || 0) >= 4;
     }
 
-    // 规则2: 拿取不同颜色宝石
+    // 规则2: 拿取不同颜色宝石 (可以少于3个)
     if (sameColorCount === 1) {
       // 检查每种选择的宝石是否有足够数量
       for (const [gemType, count] of Object.entries(selectedGems)) {

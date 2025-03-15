@@ -59,6 +59,10 @@ export interface GameState {
   lastRound: boolean;
   lastRoundStartPlayer: string | null;
   actions: GameAction[];
+  pendingDiscard?: {
+    playerId: string;
+    gemsCount: number;
+  };
 }
 
 export interface GameRoom {
@@ -82,7 +86,8 @@ export type GameActionType =
   | 'PURCHASE_CARD'
   | 'RESERVE_CARD'
   | 'CLAIM_NOBLE'
-  | 'DISCARD_GEMS';
+  | 'DISCARD_GEMS'
+  | 'RESTART_GAME';
 
 export interface TakeGemsAction {
   type: 'TAKE_GEMS';
@@ -121,9 +126,17 @@ export interface StartGameAction {
   type: 'START_GAME';
 }
 
+export interface RestartGameAction {
+  type: 'RESTART_GAME';
+  payload: {
+    players?: string[];
+  };
+}
+
 export type GameAction =
   | TakeGemsAction
   | PurchaseCardAction
   | ReserveCardAction
   | DiscardGemsAction
-  | StartGameAction; 
+  | StartGameAction
+  | RestartGameAction; 
