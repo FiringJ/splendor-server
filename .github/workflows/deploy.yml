@@ -27,65 +27,29 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           ssh $SERVER_USER@$SERVER_IP << 'ENDSSH'
-            # 检查 Docker 是否安装
-            if ! command -v docker &> /dev/null; then
-              echo "Docker not found, installing..."
-              curl -fsSL https://get.docker.com -o get-docker.sh
-              sudo sh get-docker.sh
-              sudo systemctl start docker
-              sudo systemctl enable docker
-              sudo usermod -aG docker $USER
-              # 使用 sudo 执行 docker 命令，因为组权限可能还未生效
-              export DOCKER_CMD="sudo docker"
-              export COMPOSE_CMD="sudo docker-compose"
-            else
-              export DOCKER_CMD="docker"
-              export COMPOSE_CMD="docker-compose"
-            fi
-
-            # 检查 Docker Compose 是否安装
-            if ! command -v docker-compose &> /dev/null; then
-              echo "Docker Compose not found, installing..."
-              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-              sudo chmod +x /usr/local/bin/docker-compose
-            fi
-
-            # 进入服务端目录
             cd /root/splendor-server
-
-            # 检查 docker-compose.yml 是否存在
-            if [ ! -f "docker-compose.yml" ]; then
-              echo "docker-compose.yml not found!"
-              exit 1
-            fi
-
-            # 保存旧的容器日志
+            
+            # 保存日志并拉取代码
             mkdir -p logs
-            $COMPOSE_CMD logs > logs/backup-$(date +%Y%m%d-%H%M%S).log || true
-
-            # 拉取最新代码
+            docker-compose logs > logs/backup-$(date +%Y%m%d-%H%M%S).log || true
             git pull
 
             # 停止并删除旧容器
-            $COMPOSE_CMD down || true
+            docker-compose down
 
             # 删除旧的构建缓存
-            $DOCKER_CMD builder prune -f || true
+            docker builder prune -f
 
-            # 重新构建并启动容器
-            $COMPOSE_CMD up -d --build
+            # 重新构建和启动服务
+            docker-compose up -d --build
 
-            # 检查容器状态
-            $COMPOSE_CMD ps
-            
-            # 等待服务启动
+            # 等待服务启动并检查
             echo "Waiting for server service to start..."
             sleep 10
             
-            # 检查服务是否正常运行
             if ! curl -s http://localhost:3001 > /dev/null; then
               echo "Server service is not responding!"
-              $COMPOSE_CMD logs
+              docker-compose logs
               exit 1
             fi
             
