@@ -29,16 +29,24 @@ jobs:
           ssh $SERVER_USER@$SERVER_IP << 'ENDSSH'
             cd /root/splendor-server
             
-            # 保存日志并拉取代码
+            # 保存最新日志
             mkdir -p logs
             docker-compose logs > logs/backup-$(date +%Y%m%d-%H%M%S).log || true
+
+            # 清理7天前的日志
+            find logs -name "backup-*.log" -mtime +7 -delete
+
+            # 拉取最新代码
             git pull
 
-            # 停止并删除旧容器
+            # 停止容器
             docker-compose down
 
-            # 删除旧的构建缓存
-            docker builder prune -f
+            # 清理所有未使用的构建缓存
+            docker builder prune -f --filter until=24h
+
+            # 清理未使用的镜像
+            docker image prune -a -f --filter until=24h
 
             # 重新构建和启动服务
             docker-compose up -d --build
@@ -52,6 +60,10 @@ jobs:
               docker-compose logs
               exit 1
             fi
+
+            # 部署成功后进行全面清理
+            echo "Cleaning up Docker system..."
+            docker system prune -f --volumes
             
             echo "Server deployment completed successfully!"
           ENDSSH 
