@@ -1,0 +1,64 @@
+name: Deploy Server
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add SSH known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh $SERVER_USER@$SERVER_IP << 'ENDSSH'
+            # 进入服务端目录
+            cd /root/splendor-server
+
+            # 保存旧的容器日志
+            mkdir -p logs
+            docker-compose logs > logs/backup-$(date +%Y%m%d-%H%M%S).log || true
+
+            # 拉取最新代码
+            git pull
+
+            # 停止并删除旧容器
+            docker-compose down
+
+            # 删除旧的构建缓存
+            docker builder prune -f
+
+            # 重新构建并启动容器
+            docker-compose up -d --build
+
+            # 检查容器状态
+            docker-compose ps
+            
+            # 等待服务启动
+            echo "Waiting for server service to start..."
+            sleep 10
+            
+            # 检查服务是否正常运行
+            if ! curl -s http://localhost:3001 > /dev/null; then
+              echo "Server service is not responding!"
+              docker-compose logs
+              exit 1
+            fi
+            
+            echo "Server deployment completed successfully!"
+          ENDSSH 
