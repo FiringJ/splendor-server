@@ -5,9 +5,7 @@
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/src/main.js",
-    "dev": "ts-node-dev src/main.ts",
-    "test": "jest"
+    "dev": "ts-node-dev src/main.ts"
   },
   "keywords": [],
   "author": "",
