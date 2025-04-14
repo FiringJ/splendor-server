@@ -65,5 +65,5 @@ jobs:
             echo "Cleaning up Docker system..."
             docker system prune -f --volumes
             
-            echo "Server deployment completed successfully!"
+            echo \"Server deployment completed successfully!\"
           ENDSSH 
