@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   server:
     build:
@@ -10,4 +8,4 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-    restart: unless-stopped 
+    restart: unless-stopped
