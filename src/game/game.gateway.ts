@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { GameAction, RoomState, Player, GameState } from './interfaces/game.interface';
 import { AIService } from './ai.service';
+import { logger } from '../logger';
 
 @WebSocketGateway({
   path: '/socket.io', // 必须与客户端连接路径完全一致
@@ -39,17 +40,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) { }
 
   handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+    logger.info(`Client connected: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
-    console.log(`Client disconnected: ${client.id}, reason:`, client.disconnected ? 'client disconnected' : 'transport error');
+    logger.info(`Client disconnected: ${client.id}, reason:`, client.disconnected ? 'client disconnected' : 'transport error');
 
     // 查找该客户端所在的房间
     for (const [roomId, room] of this.rooms.entries()) {
       const player = room.players.find(p => p.clientId === client.id);
       if (player) {
-        console.log(`Player ${player.name} (${player.id}) disconnected from room ${roomId}`, {
+        logger.info(`Player ${player.name} (${player.id}) disconnected from room ${roomId}`, {
           roomStatus: room.status,
           isLocalMode: room.isLocalMode,
           playersCount: room.players.length
@@ -57,7 +58,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         // 如果是本地模式且游戏已经开始，不做任何处理
         if (room.isLocalMode && room.status === 'playing') {
-          console.log(`Local mode game in progress, ignoring disconnect for player ${player.id}`);
+          logger.info(`Local mode game in progress, ignoring disconnect for player ${player.id}`);
           return;
         }
 
@@ -75,19 +76,19 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
             if (currentRoom) {
               // 再次检查是否是本地模式
               if (currentRoom.isLocalMode) {
-                console.log(`Local mode room, not removing disconnected player ${player.id}`);
+                logger.info(`Local mode room, not removing disconnected player ${player.id}`);
                 return;
               }
 
               const playerStillDisconnected = currentRoom.players.find(p => p.id === player.id && !p.clientId);
               if (playerStillDisconnected) {
-                console.log(`Removing disconnected player ${player.id} from room ${roomId}`);
+                logger.info(`Removing disconnected player ${player.id} from room ${roomId}`);
                 currentRoom.players = currentRoom.players.filter(p => p.id !== player.id);
                 if (currentRoom.players.length === 0) {
-                  console.log(`Room ${roomId} is empty, deleting it`);
+                  logger.info(`Room ${roomId} is empty, deleting it`);
                   this.rooms.delete(roomId);
                 } else if (currentRoom.hostId === player.id) {
-                  console.log(`Host ${player.id} disconnected, assigning new host: ${currentRoom.players[0].id}`);
+                  logger.info(`Host ${player.id} disconnected, assigning new host: ${currentRoom.players[0].id}`);
                   currentRoom.hostId = currentRoom.players[0].id;
                 }
                 this.server.to(roomId).emit('roomUpdate', currentRoom);
@@ -105,7 +106,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { playerId: string, playerName?: string }
   ) {
-    console.log('Received createRoom request:', {
+    logger.info('Received createRoom request:', {
       clientId: client.id,
       playerId: data.playerId,
       playerName: data.playerName
@@ -134,7 +135,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 将客户端加入Socket.IO房间
       client.join(roomId);
 
-      console.log('Room created:', {
+      logger.info('Room created:', {
         roomId,
         hostId: room.hostId,
         playerName: room.players[0].name,
@@ -150,7 +151,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         }
       };
     } catch (error) {
-      console.error('Error creating room:', error);
+      logger.error('Error creating room:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
@@ -229,7 +230,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { success: true, room };
     } catch (error) {
-      console.error('Error joining room:', error);
+      logger.error('Error joining room:', error);
       return { success: false, error: 'Failed to join room' };
     }
   }
@@ -240,16 +241,16 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string, isLocalMode?: boolean }
   ) {
     try {
-      console.log('Starting game for room:', data.roomId, 'isLocalMode:', data.isLocalMode);
+      logger.info('Starting game for room:', data.roomId, 'isLocalMode:', data.isLocalMode);
 
       const room = this.rooms.get(data.roomId);
       if (!room) {
-        console.error('Room not found:', data.roomId);
+        logger.error('Room not found:', data.roomId);
         return { success: false, error: 'Room not found' };
       }
 
       if (room.players.length < 2) {
-        console.error('Not enough players:', room.players.length);
+        logger.error('Not enough players:', room.players.length);
         return { success: false, error: 'Need at least 2 players' };
       }
 
@@ -261,7 +262,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const humanPlayers = room.players.filter(p => !p.isAI);
 
         if (!connectedSockets || connectedSockets.size !== humanPlayers.length) {
-          console.error('Not all human players are connected:', {
+          logger.error('Not all human players are connected:', {
             expected: humanPlayers.length,
             connected: connectedSockets?.size || 0
           });
@@ -271,11 +272,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // 确保是房主在开始游戏
       if (room.hostId !== room.players.find(p => p.clientId === client.id)?.id) {
-        console.error('Only host can start the game');
+        logger.error('Only host can start the game');
         return { success: false, error: 'Only host can start the game' };
       }
 
-      console.log('Initializing game with players:', room.players);
+      logger.info('Initializing game with players:', room.players);
       const gameRoom = this.gameService.initializeGame(room.players);
 
       // 更新房间状态
@@ -284,13 +285,13 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // 在本地模式下，标记房间为本地模式
       if (data.isLocalMode) {
-        console.log('Setting room to local mode');
+        logger.info('Setting room to local mode');
         room.isLocalMode = true;
       }
 
       this.rooms.set(data.roomId, room);
 
-      console.log('Room state after initialization:', {
+      logger.info('Room state after initialization:', {
         id: room.id,
         status: room.status,
         isLocalMode: room.isLocalMode,
@@ -311,22 +312,22 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         status: 'playing'
       };
 
-      console.log('Game initialized, sending full state to players');
+      logger.info('Game initialized, sending full state to players');
       this.server.to(data.roomId).emit('gameStarted', fullState);
 
       // 如果有AI玩家，立即开始AI回合（如果当前回合是AI玩家）
       if (hasAIPlayers && gameRoom.gameState.currentTurn) {
         const currentPlayer = gameRoom.gameState.players.get(gameRoom.gameState.currentTurn);
         if (currentPlayer && currentPlayer.isAI) {
-          console.log('AI player turn, triggering AI action');
+          logger.info('AI player turn, triggering AI action');
           setTimeout(() => this.handleAITurn(data.roomId), 1000);
         }
       }
 
-      console.log('Game started successfully for room:', data.roomId);
+      logger.info('Game started successfully for room:', data.roomId);
       return { success: true, gameState };
     } catch (error) {
-      console.error('Error starting game:', error);
+      logger.error('Error starting game:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
@@ -336,7 +337,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { roomId: string; action: GameAction }
   ) {
-    console.log('Received gameAction:', {
+    logger.info('Received gameAction:', {
       clientId: client.id,
       roomId: data.roomId,
       actionType: data.action.type,
@@ -347,7 +348,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 从Gateway的rooms Map中获取房间
       const room = this.rooms.get(data.roomId);
       if (!room) {
-        console.error('Room not found:', data.roomId);
+        logger.error('Room not found:', data.roomId);
         return { success: false, error: 'Room not found' };
       }
 
@@ -366,7 +367,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 转换状态用于传输
       const gameStateForTransport = this.convertGameStateForTransport(newGameState);
 
-      console.log('Game action processed successfully:', {
+      logger.info('Game action processed successfully:', {
         roomId: data.roomId,
         actionType: data.action.type,
         newGameState: {
@@ -387,7 +388,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { success: true };
     } catch (error) {
-      console.error('Error processing game action:', error);
+      logger.error('Error processing game action:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -398,11 +399,11 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // 处理重新开始游戏
   private handleRestartGame(client: Socket, roomId: string, action: GameAction) {
     try {
-      console.log('Restarting game for room:', roomId);
+      logger.info('Restarting game for room:', roomId);
 
       const room = this.rooms.get(roomId);
       if (!room) {
-        console.error('Room not found for restart:', roomId);
+        logger.error('Room not found for restart:', roomId);
         return { success: false, error: 'Room not found' };
       }
 
@@ -433,14 +434,14 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         action: action
       });
 
-      console.log('Game restarted successfully for room:', roomId);
+      logger.info('Game restarted successfully for room:', roomId);
 
       // 处理AI玩家的回合
       setTimeout(() => this.handleAITurn(roomId), 1000);
 
       return { success: true, gameState: gameStateForTransport };
     } catch (error) {
-      console.error('Error restarting game:', error);
+      logger.error('Error restarting game:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -462,7 +463,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 检查当前玩家是否是AI
       if (!currentPlayer || !currentPlayer.isAI) return;
 
-      console.log(`处理AI玩家回合: ${currentPlayer.name} (${currentPlayerId})`);
+      logger.info(`处理AI玩家回合: ${currentPlayer.name} (${currentPlayerId})`);
 
       // 获取AI的下一步动作
       const aiAction = this.aiService.getNextAction(room.gameState, currentPlayerId);
@@ -486,7 +487,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 如果下一个玩家也是AI，继续处理
       setTimeout(() => this.handleAITurn(roomId), 1000);
     } catch (error) {
-      console.error('处理AI回合出错:', error);
+      logger.error('处理AI回合出错:', error);
     }
   }
 
@@ -538,7 +539,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       return { success: true };
     } catch (error) {
-      console.error('Error sending message:', error);
+      logger.error('Error sending message:', error);
       return { success: false, error: 'Failed to send message' };
     }
   }
@@ -549,36 +550,36 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: { roomId: string; playerId: string }
   ) {
     try {
-      console.log('Removing player from room:', data);
+      logger.info('Removing player from room:', data);
 
       const room = this.rooms.get(data.roomId);
       if (!room) {
-        console.error('Room not found for removing player:', data.roomId);
+        logger.error('Room not found for removing player:', data.roomId);
         return { success: false, error: 'Room not found' };
       }
 
       // 确保只有房主可以移除玩家
       const requestingPlayer = room.players.find(p => p.clientId === client.id);
       if (!requestingPlayer || requestingPlayer.id !== room.hostId) {
-        console.error('Only host can remove players');
+        logger.error('Only host can remove players');
         return { success: false, error: 'Only host can remove players' };
       }
 
       // 确保游戏尚未开始
       if (room.status !== 'waiting') {
-        console.error('Cannot remove players once game has started');
+        logger.error('Cannot remove players once game has started');
         return { success: false, error: 'Cannot remove players once game has started' };
       }
 
       // 确保要移除的是AI玩家
       const playerToRemove = room.players.find(p => p.id === data.playerId);
       if (!playerToRemove) {
-        console.error('Player not found in room:', data.playerId);
+        logger.error('Player not found in room:', data.playerId);
         return { success: false, error: 'Player not found in room' };
       }
 
       if (!playerToRemove.isAI) {
-        console.error('Only AI players can be removed:', data.playerId);
+        logger.error('Only AI players can be removed:', data.playerId);
         return { success: false, error: 'Only AI players can be removed' };
       }
 
@@ -592,10 +593,10 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // 发送系统消息通知
       this.sendSystemMessage(data.roomId, `${playerToRemove.name}已被移除`);
 
-      console.log('Player removed successfully:', data.playerId);
+      logger.info('Player removed successfully:', data.playerId);
       return { success: true };
     } catch (error) {
-      console.error('Error removing player:', error);
+      logger.error('Error removing player:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
