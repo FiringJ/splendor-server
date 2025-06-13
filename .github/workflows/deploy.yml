@@ -20,11 +20,9 @@ jobs:
           version: 9.11.0
 
       - name: Install dependencies
-        working-directory: splendor-server
         run: pnpm install --frozen-lockfile
 
       - name: Build server
-        working-directory: splendor-server
         run: pnpm run build
 
       - name: Set up Docker Buildx
@@ -33,8 +31,8 @@ jobs:
       - name: Build Docker image and save as tar
         uses: docker/build-push-action@v5
         with:
-          context: ./splendor-server
-          file: ./splendor-server/Dockerfile
+          context: .
+          file: ./Dockerfile
           push: false
           tags: splendor-server-image:latest
           outputs: type=docker,dest=image.tar
