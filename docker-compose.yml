@@ -1,8 +1,7 @@
 services:
   server:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: splendor-server-image:latest
+    container_name: splendor-server-server-1
     ports:
       - "3001:3001"
     environment:

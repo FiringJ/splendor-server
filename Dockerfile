@@ -1,24 +1,24 @@
-# 构建阶段
+# Build stage
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
 
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
-# 运行阶段
+# Runtime stage
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm install --production
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --prod --frozen-lockfile
 
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3001
 
-CMD ["npm", "start"]
+CMD ["pnpm", "start"]
