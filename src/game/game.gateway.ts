@@ -495,7 +495,38 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private convertGameStateForTransport(gameState: GameState): Omit<GameState, 'players'> & { players: Player[] } {
     return {
       ...gameState,
-      players: Array.from(gameState.players.values())
+      players: Array.from(gameState.players.values()),
+      cards: {
+        ...gameState.cards,
+        // 确保牌堆在传输时显示为背面，仅传递数量信息
+        deck1: gameState.cards.deck1.map(() => ({ 
+          id: -1, 
+          level: 1 as const, 
+          points: 0, 
+          gem: 'onyx' as const, 
+          cost: {}, 
+          spritePosition: { x: 0, y: 1 },
+          isCardBack: true 
+        })),
+        deck2: gameState.cards.deck2.map(() => ({ 
+          id: -1, 
+          level: 2 as const, 
+          points: 0, 
+          gem: 'onyx' as const, 
+          cost: {}, 
+          spritePosition: { x: 1, y: 1 },
+          isCardBack: true 
+        })),
+        deck3: gameState.cards.deck3.map(() => ({ 
+          id: -1, 
+          level: 3 as const, 
+          points: 0, 
+          gem: 'onyx' as const, 
+          cost: {}, 
+          spritePosition: { x: 2, y: 1 },
+          isCardBack: true 
+        }))
+      }
     };
   }
 

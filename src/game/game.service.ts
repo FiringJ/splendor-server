@@ -17,9 +17,6 @@ export class GameError extends Error {
 @Injectable()
 export class GameService {
   private readonly logger = new Logger(GameService.name);
-  private deck1: Card[] = [];
-  private deck2: Card[] = [];
-  private deck3: Card[] = [];
 
   // 初始化游戏
   public initializeGame(players: Player[]): GameRoom {
@@ -216,23 +213,23 @@ export class GameService {
 
     let card: Card | undefined;
 
-    // 处理从牌堆顶部预留卡牌的情况
-    if (cardId === -1 && level) {
-      // 确定牌堆
-      const deckKey = `deck${level}` as keyof typeof this;
-      const deck = this[deckKey] as Card[];
+          // 处理从牌堆顶部预留卡牌的情况
+      if (cardId === -1 && level) {
+        // 从游戏状态中获取牌堆
+        const deckDisplayKey = `deck${level}` as keyof typeof state.cards;
+        const deck = newState.cards[deckDisplayKey] as Card[];
 
-      if (deck.length === 0) {
-        throw new Error(`No cards left in level ${level} deck`);
-      }
+        if (deck.length === 0) {
+          throw new Error(`No cards left in level ${level} deck`);
+        }
 
-      // 从牌堆中取出顶部卡牌
-      card = deck.pop();
+        // 从牌堆中取出顶部卡牌
+        card = deck.pop();
+        if (!card) throw new Error('Failed to get card from deck');
 
-      // 更新前端显示的牌堆信息
-      const deckDisplayKey = `deck${level}` as keyof typeof state.cards;
-      state.cards[deckDisplayKey] = deck.map(c => ({ ...c, isCardBack: true }));
-    } else {
+        // 更新牌堆状态
+        newState.cards[deckDisplayKey] = [...deck];
+      } else {
       // 从展示区域预留可见卡牌
       card = this.findCard(newState, cardId);
       if (!card) throw new Error('Card not found');
@@ -332,21 +329,21 @@ export class GameService {
     const display3 = level3Cards.slice(0, 4);
 
     // 将剩余卡牌放入牌堆
-    this.deck1 = level1Cards.slice(4);
-    this.deck2 = level2Cards.slice(4);
-    this.deck3 = level3Cards.slice(4);
+    const deck1 = level1Cards.slice(4);
+    const deck2 = level2Cards.slice(4);
+    const deck3 = level3Cards.slice(4);
 
     // 检查并确保所有卡牌ID唯一
-    this.validateUniqueCardIds(display1, display2, display3, this.deck1, this.deck2, this.deck3);
+    this.validateUniqueCardIds(display1, display2, display3, deck1, deck2, deck3);
 
     return {
       level1: display1,
       level2: display2,
       level3: display3,
-      // 添加牌堆数量信息，用于前端展示
-      deck1: this.deck1.map(card => ({ ...card, isCardBack: true })),
-      deck2: this.deck2.map(card => ({ ...card, isCardBack: true })),
-      deck3: this.deck3.map(card => ({ ...card, isCardBack: true }))
+      // 牌堆存储实际卡牌对象，而不是背面显示对象
+      deck1: deck1,
+      deck2: deck2,
+      deck3: deck3
     };
   }
 
@@ -576,24 +573,23 @@ export class GameService {
 
     // 从展示区移除并补充
     const level = `level${card.level}` as keyof typeof state.cards;
-    const deckKey = `deck${card.level}` as keyof typeof this;
-    const deck = this[deckKey] as Card[];
+    const deckKey = `deck${card.level}` as keyof typeof state.cards;
+    const deck = state.cards[deckKey] as Card[];
 
     // 从展示区移除当前卡牌
     state.cards[level] = state.cards[level].filter(c => c.id !== card.id);
 
-    // 如果牌堆还有卡牌，则补充
-    if (deck.length > 0) {
-      // 直接取出牌堆顶卡牌
-      const newCard = deck.pop()!;
+          // 如果牌堆还有卡牌，则补充
+      if (deck.length > 0) {
+        // 从牌堆中取出顶部卡牌
+        const newCard = deck.pop()!;
 
-      // 添加到展示区
-      state.cards[level].push(newCard);
+        // 添加到展示区
+        state.cards[level].push(newCard);
 
-      // 更新前端显示的牌堆信息
-      const deckDisplayKey = `deck${card.level}` as keyof typeof state.cards;
-      state.cards[deckDisplayKey] = deck.map(card => ({ ...card, isCardBack: true }));
-    }
+        // 更新牌堆状态
+        state.cards[deckKey] = [...deck];
+      }
   }
 
   private checkNobles(state: GameState, player: Player): void {
