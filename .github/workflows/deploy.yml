@@ -1,10 +1,10 @@
 name: Build and Deploy Server
 
+# The repository root is the server. Do not filter on splendor-server/** —
+# that path never matches, so pushes to main would not deploy.
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'splendor-server/**'
   workflow_dispatch:
 
 jobs:
@@ -68,17 +68,83 @@ jobs:
       - name: Copy image to server
         run: scp image.tar ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/root/splendor-server/
 
+      - name: Record whether OpenRouter secret is available
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -n "$OPENROUTER_API_KEY" ]; then
+            echo "GitHub Actions secret OPENROUTER_API_KEY is set."
+            echo "Deploy will write AI_ENGINE=jev and the key to /root/splendor-server/.env (value not printed)."
+          else
+            echo "GitHub Actions secret OPENROUTER_API_KEY is NOT set."
+            echo "Deploy will not invent a key and will not change AI_ENGINE."
+            echo "POST-DEPLOY: on the VPS, edit /root/splendor-server/.env and set:"
+            echo "  AI_ENGINE=jev"
+            echo "  OPENROUTER_API_KEY=<OpenRouter API key>"
+            echo "Then: cd /root/splendor-server && docker-compose up -d --force-recreate"
+            echo "Until then the compose default remains AI_ENGINE=heuristic when unset."
+          fi
+
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 20m
+          envs: OPENROUTER_API_KEY
           script: |
             cd /root/splendor-server
             mkdir -p logs
             docker-compose logs > logs/backup-$(date +%Y%m%d-%H%M%S).log || true
             find logs -name "backup-*.log" -mtime +7 -delete
+
+            touch .env
+            chmod 600 .env
+            upsert_env() {
+              key="$1"
+              value="$2"
+              tmp=$(mktemp)
+              grep -v "^${key}=" .env > "$tmp" || true
+              case "$value" in
+                *[!A-Za-z0-9._:+/-]*)
+                  escaped=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\$/\\$/g' -e 's/`/\\`/g')
+                  printf '%s="%s"\n' "$key" "$escaped" >> "$tmp"
+                  ;;
+                *)
+                  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+                  ;;
+              esac
+              mv "$tmp" .env
+              chmod 600 .env
+            }
+
+            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+              upsert_env AI_ENGINE jev
+              upsert_env OPENROUTER_API_KEY "$OPENROUTER_API_KEY"
+              echo "Wrote AI_ENGINE=jev and OPENROUTER_API_KEY into /root/splendor-server/.env (key value not printed)."
+            else
+              echo "OPENROUTER_API_KEY GitHub Actions secret is not set. Not inventing a key and not changing AI_ENGINE."
+              echo "POST-DEPLOY: on the VPS, edit /root/splendor-server/.env and set:"
+              echo "  AI_ENGINE=jev"
+              echo "  OPENROUTER_API_KEY=<OpenRouter API key>"
+              echo "Then: cd /root/splendor-server && docker-compose up -d --force-recreate"
+              echo "Compose default remains AI_ENGINE=heuristic when the variable is unset. The binary falls back to the heuristic if jev is selected without a key."
+            fi
+
+            if grep -q '^AI_ENGINE=' .env; then
+              echo "JEV_ENV_STATUS AI_ENGINE=$(grep '^AI_ENGINE=' .env | tail -1 | cut -d= -f2-)"
+            else
+              echo "JEV_ENV_STATUS AI_ENGINE=unset (compose default heuristic)"
+            fi
+            if grep -qE '^OPENROUTER_API_KEY=.+' .env; then
+              echo "JEV_ENV_STATUS OPENROUTER_API_KEY=set"
+            else
+              echo "JEV_ENV_STATUS OPENROUTER_API_KEY=missing"
+            fi
+
             docker-compose down || true
             docker load < image.tar
             docker-compose up -d
@@ -89,6 +155,6 @@ jobs:
               docker-compose logs
               exit 1
             fi
-            rm image.tar
+            rm -f image.tar
             docker system prune -f --volumes
             echo "✅ Server deployment completed successfully!"
