@@ -7,7 +7,8 @@
     "build": "tsc",
     "start": "node dist/src/main.js",
     "dev": "ts-node-dev src/main.ts",
-    "test": "jest --forceExit"
+    "test": "jest --forceExit",
+    "smoke:jev": "node dist/scripts/smoke-jev-live.js"
   },
   "keywords": [],
   "author": "",
