@@ -73,30 +73,47 @@ jobs:
             exit 1
           fi
           echo "SERVER_IP length=${#SERVER_IP}"
-          if timeout 15 bash -c 'echo >/dev/tcp/$1/22' _ "$SERVER_IP"; then
-            echo "tcp/22 reachable"
-          else
-            echo "tcp/22 check failed (exit $?)"
+          # Port 22 was connection-refused from GitHub Actions. Probe common SSH
+          # ports and keep the host out of the logs.
+          SSH_PORT=""
+          for port in 22 222 2222 2200 2022 22022 22222 10022 443 8022 8443; do
+            raw=$(timeout 4 bash -c 'exec 3<>/dev/tcp/$1/$2 && IFS= read -r -t 3 line <&3 && printf "BANNER:%s" "$line"' _ "$SERVER_IP" "$port" 2>&1 || true)
+            safe=${raw//$SERVER_IP/[server]}
+            case "$safe" in
+              *BANNER:SSH-*)
+                echo "found SSH banner on port $port"
+                SSH_PORT=$port
+                break
+                ;;
+              *)
+                echo "port $port: $(printf '%s' "$safe" | tr '\n' ' ' | cut -c1-180)"
+                ;;
+            esac
+          done
+          if [ -z "$SSH_PORT" ]; then
+            echo "HARD BLOCKER: host is reachable, but no SSH banner on common ports. Port 22 returns connection refused."
+            exit 1
           fi
+          echo "SSH_PORT=$SSH_PORT" >> "$GITHUB_ENV"
           # ssh-keyscan exits 1 when any default key type is missing, even if other
           # keys were written. bash -e would fail the step before scp.
           scan_err=$(mktemp)
-          ssh-keyscan -T 20 -t ed25519,ecdsa,rsa -H "$SERVER_IP" >> ~/.ssh/known_hosts 2>"$scan_err" || true
+          ssh-keyscan -p "$SSH_PORT" -T 20 -t ed25519,ecdsa,rsa -H "$SERVER_IP" >> ~/.ssh/known_hosts 2>"$scan_err" || true
           if [ ! -s ~/.ssh/known_hosts ]; then
-            ssh-keyscan -4 -T 20 -t ed25519,ecdsa,rsa -H "$SERVER_IP" >> ~/.ssh/known_hosts 2>>"$scan_err" || true
+            ssh-keyscan -4 -p "$SSH_PORT" -T 20 -t ed25519,ecdsa,rsa -H "$SERVER_IP" >> ~/.ssh/known_hosts 2>>"$scan_err" || true
           fi
           while IFS= read -r line || [ -n "$line" ]; do
             printf '%s\n' "${line//$SERVER_IP/[server]}"
           done < "$scan_err"
           rm -f "$scan_err"
           if [ ! -s ~/.ssh/known_hosts ]; then
-            echo "ssh-keyscan collected no host keys. VPS port 22 is not answering GitHub Actions, or SERVER_IP is wrong."
+            echo "ssh-keyscan collected no host keys on port $SSH_PORT."
             exit 1
           fi
           echo "known_hosts lines: $(wc -l < ~/.ssh/known_hosts)"
 
       - name: Copy image to server
-        run: scp image.tar ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/root/splendor-server/
+        run: scp -P "${SSH_PORT:-22}" -o ConnectTimeout=20 image.tar ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/root/splendor-server/
 
       - name: Record whether OpenRouter secret is available
         env:
@@ -121,6 +138,7 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         with:
           host: ${{ secrets.SERVER_IP }}
+          port: ${{ env.SSH_PORT || '22' }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 20m
