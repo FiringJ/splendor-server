@@ -7,4 +7,6 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - AI_ENGINE=${AI_ENGINE:-heuristic}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
     restart: unless-stopped
