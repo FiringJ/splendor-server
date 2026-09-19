@@ -4,8 +4,19 @@ export type AiEngine = 'jev' | 'heuristic' | 'shadow';
 
 export type DecisionSource = 'jev' | 'heuristic' | 'forced';
 
+export type ClientActionType = 'TAKE_GEMS' | 'PURCHASE_CARD' | 'RESERVE_CARD' | 'DISCARD_GEMS';
+
+/** One bar in the client decision panel. */
+export interface DecisionOption {
+  id: string;
+  label: string;
+  probability: number;
+}
+
 /**
- * Optional payload on `gameStateUpdate` so a later client can show the choice.
+ * Optional payload on `gameStateUpdate`.
+ * Keeps the original fields and also the names `app/lib/game/decisionMeta.ts` normalizes,
+ * so the client panel can render without a further client change.
  * `source` is who actually played: Jev, the heuristic fallback, or a forced sole legal move.
  */
 export interface DecisionMeta {
@@ -19,6 +30,12 @@ export interface DecisionMeta {
   /** Set in shadow mode: the action Jev would have played. */
   shadowActionKey?: string;
   shadowProbs?: Record<string, number>;
+
+  modelId?: string;
+  actionType?: ClientActionType;
+  chosenOptionId?: string;
+  chosenOptionLabel?: string;
+  options?: DecisionOption[];
 }
 
 export interface AiDecision {

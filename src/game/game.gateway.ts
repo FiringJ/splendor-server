@@ -497,6 +497,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(roomId).emit('gameStateUpdate', {
         gameState: gameStateForTransport,
         action: aiAction,
+        // 同时带 actionKey/probs/model 和客户端面板字段（modelId、actionType、options 等）。
         decisionMeta: decision.meta,
       });
 

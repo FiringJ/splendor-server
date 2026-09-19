@@ -101,6 +101,10 @@ describe('JevAIService', () => {
     expect(decision.meta.source).toBe('heuristic');
     expect(decision.meta.engine).toBe('jev');
     expect(decision.meta.fallbackReason).toBe('missing_api_key');
+    expect(decision.meta.actionType).toBe('TAKE_GEMS');
+    expect(decision.meta.chosenOptionId).toBe(decision.meta.actionKey);
+    expect(decision.meta.chosenOptionLabel).toContain('Take');
+    expect(decision.meta.options).toBeUndefined();
     expect(decision.action.type).toBe('TAKE_GEMS');
   });
 
@@ -169,6 +173,17 @@ describe('JevAIService', () => {
     expect(decision.meta.model).toBe('typesafe/jev-1.13-20260917');
     expect(decision.meta.actionKey).toBe('purchase_1');
     expect(decision.meta.probs).toEqual({ purchase_1: 0.9 });
+    expect(decision.meta.modelId).toBe(decision.meta.model);
+    expect(decision.meta.actionType).toBe('PURCHASE_CARD');
+    expect(decision.meta.chosenOptionId).toBe('purchase_1');
+    expect(decision.meta.chosenOptionLabel).toContain('Buy #1');
+    expect(decision.meta.options).toEqual([
+      expect.objectContaining({
+        id: 'purchase_1',
+        probability: 0.9,
+      }),
+    ]);
+    expect(decision.meta.options?.[0].label).toContain('Buy #1');
     expect(decision.action).toMatchObject({ type: 'PURCHASE_CARD', payload: { cardId: 1 } });
   });
 
@@ -261,5 +276,15 @@ describe('JevAIService', () => {
     expect(decision.meta.engine).toBe('shadow');
     expect(decision.meta.shadowActionKey?.startsWith('take_')).toBe(true);
     expect(decision.meta.model).toBe('typesafe/jev-1.13');
+    expect(decision.meta.modelId).toBe('typesafe/jev-1.13');
+    expect(decision.meta.actionType).toBe('PURCHASE_CARD');
+    expect(decision.meta.chosenOptionId).toBe(decision.meta.actionKey);
+    expect(decision.meta.chosenOptionLabel).toContain('Buy #1');
+    expect(decision.meta.options?.[0].id.startsWith('take_')).toBe(true);
+    expect(decision.meta.options?.[0].label).toContain('Take');
+    expect(decision.meta.probs).toBeUndefined();
+    expect(decision.meta.shadowProbs).toEqual(decision.meta.options && {
+      [decision.meta.options[0].id]: decision.meta.options[0].probability,
+    });
   });
 });

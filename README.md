@@ -25,7 +25,7 @@ Docker Compose 会把这两个变量传进容器。没设置时 `AI_ENGINE` 仍�
 
 请求地址是 `POST https://openrouter.ai/api/alpha/decisions`。Choice 的 `criteria` 必须是「选项 → 说明」的对象；把选项摊成和 `type` 平级的字段会返回 HTTP 400。
 
-AI 广播的 `gameStateUpdate` 会多带一个可选的 `decisionMeta`：`actionKey`、`probs`、`model`、`latencyMs`、`source`（`jev` | `heuristic` | `forced`）。客户端可以先忽略它。一次决策最多两次 Choice，默认超时约 2.5 秒。
+AI 广播的 `gameStateUpdate` 会多带一个可选的 `decisionMeta`。一次决策最多两次 Choice，默认超时约 2.5 秒。字段同时保留旧名字和客户端面板要读的名字：`actionKey` / `chosenOptionId`、`probs`（概率映射）/ `options`（`{ id, label, probability }`，按概率从高到低）、`model` / `modelId`、`actionType`、`chosenOptionLabel`、`latencyMs`、`source`（`jev` | `heuristic` | `forced`）、可选的 `fallbackReason`。
 
 ```bash
 pnpm test

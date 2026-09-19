@@ -10,6 +10,7 @@ import {
   listLegalActions,
 } from '../legal-actions';
 import { OpenRouterClient } from './openrouter-client';
+import { withClientDecisionFields } from './decision-meta';
 import { ACTION_INSTRUCTIONS, CLASS_INSTRUCTIONS, buildActionCriteria, buildClassCriteria, buildCompactState } from './prompt';
 import { AiDecision, AiEngine, JevDecisionError, decisionTimeoutMs, getAiEngine } from './types';
 
@@ -29,27 +30,16 @@ export class JevAIService {
 
   async decide(state: GameState, playerId: string): Promise<AiDecision> {
     try {
-      const decision = await this.decideInner(state, playerId);
-      const shadow = decision.meta.shadowActionKey ? ` shadow=${decision.meta.shadowActionKey}` : '';
-      const fallback = decision.meta.fallbackReason ? ` fallback=${decision.meta.fallbackReason}` : '';
-      const model = decision.meta.model ? ` model=${decision.meta.model}` : '';
-      this.logger.log(
-        `AI ${decision.meta.engine} -> ${decision.meta.actionKey} source=${decision.meta.source} latency=${decision.meta.latencyMs}ms${model}${fallback}${shadow}`,
-      );
-      const probs = decision.meta.probs ?? decision.meta.shadowProbs;
-      if (probs) {
-        this.logger.log(`Jev probabilities: ${JSON.stringify(probs)}`);
-      }
-      return decision;
+      return this.publish(state, playerId, await this.decideInner(state, playerId));
     } catch (error) {
       this.logger.error(`AI decide failed: ${error instanceof Error ? error.message : error}`);
-      return this.fromHeuristic(state, playerId, Date.now(), getAiEngine(), 'error');
+      return this.publish(state, playerId, this.fromHeuristic(state, playerId, Date.now(), getAiEngine(), 'error'));
     }
   }
 
   /** Synchronous heuristic (or first legal move). Used when a Jev pick is stale after await. */
   heuristicDecision(state: GameState, playerId: string, reason?: string): AiDecision {
-    return this.fromHeuristic(state, playerId, Date.now(), getAiEngine(), reason);
+    return this.publish(state, playerId, this.fromHeuristic(state, playerId, Date.now(), getAiEngine(), reason));
   }
 
   private async decideInner(state: GameState, playerId: string): Promise<AiDecision> {
@@ -248,12 +238,42 @@ export class JevAIService {
     };
   }
 
+  /** Attach the client panel fields, then log. Gateway broadcasts this object as-is. */
+  private publish(state: GameState, playerId: string, decision: AiDecision): AiDecision {
+    const published = {
+      action: decision.action,
+      meta: withClientDecisionFields(decision.meta, decision.action, choiceLabels(this.gameService, state, playerId)),
+    };
+    const shadow = published.meta.shadowActionKey ? ` shadow=${published.meta.shadowActionKey}` : '';
+    const fallback = published.meta.fallbackReason ? ` fallback=${published.meta.fallbackReason}` : '';
+    const model = published.meta.model ? ` model=${published.meta.model}` : '';
+    this.logger.log(
+      `AI ${published.meta.engine} -> ${published.meta.actionKey} source=${published.meta.source} latency=${published.meta.latencyMs}ms${model}${fallback}${shadow}`,
+    );
+    const probs = published.meta.probs ?? published.meta.shadowProbs;
+    if (probs) {
+      this.logger.log(`Jev probabilities: ${JSON.stringify(probs)}`);
+    }
+    return published;
+  }
+
   private failureReason(error: unknown, aborted: boolean): string {
     if (aborted) return 'timeout';
     if (error instanceof JevDecisionError) return error.reason;
     if (error instanceof Error && error.name === 'AbortError') return 'timeout';
     return 'error';
   }
+}
+
+function choiceLabels(gameService: GameService, state: GameState, playerId: string): Record<string, string> {
+  const legal = listLegalActions(gameService, state, playerId);
+  const labels: Record<string, string> = {};
+  for (const item of legal) labels[item.key] = item.fact;
+  const player = state.players.get(playerId);
+  if (player && legal.length > 0) {
+    Object.assign(labels, buildClassCriteria(legal, state, player));
+  }
+  return labels;
 }
 
 function groupByClass(actions: LegalAction[]): Map<ActionClass, LegalAction[]> {
