@@ -61,9 +61,39 @@ jobs:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Add SSH known hosts
+        env:
+          SERVER_IP: ${{ secrets.SERVER_IP }}
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+          chmod 700 ~/.ssh
+          # Trim accidental whitespace. Do not print the host.
+          SERVER_IP=$(printf '%s' "$SERVER_IP" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+          if [ -z "$SERVER_IP" ]; then
+            echo "SERVER_IP secret is empty."
+            exit 1
+          fi
+          echo "SERVER_IP length=${#SERVER_IP}"
+          if timeout 15 bash -c 'echo >/dev/tcp/$1/22' _ "$SERVER_IP"; then
+            echo "tcp/22 reachable"
+          else
+            echo "tcp/22 check failed (exit $?)"
+          fi
+          # ssh-keyscan exits 1 when any default key type is missing, even if other
+          # keys were written. bash -e would fail the step before scp.
+          scan_err=$(mktemp)
+          ssh-keyscan -T 20 -t ed25519,ecdsa,rsa -H "$SERVER_IP" >> ~/.ssh/known_hosts 2>"$scan_err" || true
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            ssh-keyscan -4 -T 20 -t ed25519,ecdsa,rsa -H "$SERVER_IP" >> ~/.ssh/known_hosts 2>>"$scan_err" || true
+          fi
+          while IFS= read -r line || [ -n "$line" ]; do
+            printf '%s\n' "${line//$SERVER_IP/[server]}"
+          done < "$scan_err"
+          rm -f "$scan_err"
+          if [ ! -s ~/.ssh/known_hosts ]; then
+            echo "ssh-keyscan collected no host keys. VPS port 22 is not answering GitHub Actions, or SERVER_IP is wrong."
+            exit 1
+          fi
+          echo "known_hosts lines: $(wc -l < ~/.ssh/known_hosts)"
 
       - name: Copy image to server
         run: scp image.tar ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/root/splendor-server/
