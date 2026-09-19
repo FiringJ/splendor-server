@@ -452,7 +452,7 @@ export class GameService {
   }
 
   // 游戏规则验证方法
-  private canTakeGems(selectedGems: Partial<Record<GemType, number>>, state: GameState): boolean {
+  public canTakeGems(selectedGems: Partial<Record<GemType, number>>, state: GameState): boolean {
     // 禁止选择黄金
     if (selectedGems.gold) return false;
 
@@ -513,10 +513,36 @@ export class GameService {
     return true;
   }
 
-  private canReserveCard(player: Player): boolean {
+  public canReserveCard(player: Player): boolean {
     if (player.reservedCards.length >= 3) return false;
     const currentGemCount = Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
     return currentGemCount < 10;
+  }
+
+  public isActionLegal(state: GameState, action: GameAction): boolean {
+    return this.validateAction(state, action);
+  }
+
+  /**
+   * 丢弃后宝石总数必须 ≤ 10，且不能丢出玩家没有的宝石。
+   * 与 handleDiscardGems 的校验一致，供合法动作枚举使用。
+   */
+  public canDiscardGems(player: Player, gemsToDiscard: Partial<Record<GemType, number>>): boolean {
+    if (!player || !gemsToDiscard) return false;
+
+    let discardTotal = 0;
+    for (const [gemType, count] of Object.entries(gemsToDiscard)) {
+      const amount = count || 0;
+      if (amount < 0) return false;
+      if (amount === 0) continue;
+      discardTotal += amount;
+      const available = player.gems[gemType as GemType] || 0;
+      if (amount > available) return false;
+    }
+
+    if (discardTotal <= 0) return false;
+    const currentTotal = Object.values(player.gems).reduce((sum, count) => sum + (count || 0), 0);
+    return currentTotal - discardTotal <= 10;
   }
 
   private handlePayment(state: GameState, card: Card, player: Player): void {
