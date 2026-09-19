@@ -10,7 +10,8 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { GameAction, RoomState, Player, GameState } from './interfaces/game.interface';
-import { AIService } from './ai.service';
+import { JevAIService } from './jev/jev-ai.service';
+import { isApplicableAction } from './legal-actions';
 import { logger } from '../logger';
 
 @WebSocketGateway({
@@ -36,7 +37,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   constructor(
     private readonly gameService: GameService,
-    private readonly aiService: AIService
+    private readonly jevAiService: JevAIService,
   ) { }
 
   handleConnection(client: Socket) {
@@ -455,7 +456,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async handleAITurn(roomId: string) {
     try {
       const room = this.rooms.get(roomId);
-      if (!room || room.status !== 'playing') return;
+      if (!room || room.status !== 'playing' || !room.gameState) return;
 
       const currentPlayerId = room.gameState.currentTurn;
       const currentPlayer = room.gameState.players.get(currentPlayerId);
@@ -465,23 +466,50 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       logger.info(`处理AI玩家回合: ${currentPlayer.name} (${currentPlayerId})`);
 
-      // 获取AI的下一步动作
-      const aiAction = this.aiService.getNextAction(room.gameState, currentPlayerId);
+      // Jev（或启发式回退）可能要等网络；超时在 JevAIService 内，默认 2.5s。
+      let decision = await this.jevAiService.decide(room.gameState, currentPlayerId);
 
-      // 执行AI动作
-      const result = this.gameService.handleGameAction(room.gameState, aiAction);
+      const latest = this.rooms.get(roomId);
+      if (!latest?.gameState || latest.status !== 'playing') return;
+      if (latest.gameState.currentTurn !== currentPlayerId) return;
+      const stillAi = latest.gameState.players.get(currentPlayerId);
+      if (!stillAi?.isAI) return;
 
-      // 更新房间的游戏状态
-      room.gameState = result;
-      this.rooms.set(roomId, room);
+      if (!isApplicableAction(this.gameService, latest.gameState, currentPlayerId, decision.action)) {
+        logger.warn(`AI choice no longer legal, using heuristic`, {
+          actionKey: decision.meta.actionKey,
+        });
+        decision = this.jevAiService.heuristicDecision(
+          latest.gameState,
+          currentPlayerId,
+          'stale_or_illegal',
+        );
+      }
 
-      // 转换状态用于传输
+      const aiAction = decision.action;
+      const result = this.gameService.handleGameAction(latest.gameState, aiAction);
+
+      latest.gameState = result;
+      this.rooms.set(roomId, latest);
+
       const gameStateForTransport = this.convertGameStateForTransport(result);
 
-      // 广播游戏状态更新
       this.server.to(roomId).emit('gameStateUpdate', {
         gameState: gameStateForTransport,
-        action: aiAction
+        action: aiAction,
+        // 同时带 actionKey/probs/model 和客户端面板字段（modelId、actionType、options 等）。
+        decisionMeta: decision.meta,
+      });
+
+      logger.info('AI decision applied', {
+        roomId,
+        playerId: currentPlayerId,
+        actionKey: decision.meta.actionKey,
+        source: decision.meta.source,
+        engine: decision.meta.engine,
+        model: decision.meta.model,
+        latencyMs: decision.meta.latencyMs,
+        fallbackReason: decision.meta.fallbackReason,
       });
 
       // 如果下一个玩家也是AI，继续处理

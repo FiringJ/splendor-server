@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/src/main.js",
-    "dev": "ts-node-dev src/main.ts"
+    "dev": "ts-node-dev src/main.ts",
+    "test": "jest --forceExit"
   },
   "keywords": [],
   "author": "",
@@ -37,5 +38,11 @@
     "ts-jest": "^29.2.5",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.7.3"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "rootDir": "src",
+    "testRegex": ".*\\.spec\\.ts$"
   }
 }
