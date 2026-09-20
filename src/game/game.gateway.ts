@@ -13,11 +13,12 @@ import { GameAction, RoomState, Player, GameState } from './interfaces/game.inte
 import { JevAIService } from './jev/jev-ai.service';
 import { isApplicableAction } from './legal-actions';
 import { logger } from '../logger';
+import { getCorsOrigins } from '../cors-origins';
 
 @WebSocketGateway({
   path: '/socket.io', // 必须与客户端连接路径完全一致
   cors: {
-    origin: ['https://www.splendor.uno', 'http://localhost:3000'],
+    origin: getCorsOrigins(),
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Sec-WebSocket-Protocol'],
     credentials: true

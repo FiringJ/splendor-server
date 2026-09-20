@@ -16,6 +16,11 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+ENV NODE_ENV=production
+# Fly (and Docker) inject PORT; bind all interfaces so the proxy can reach us.
+ENV PORT=3001
+ENV HOST=0.0.0.0
+
 COPY package.json pnpm-lock.yaml ./
 RUN npm install -g pnpm@9.11.0 && pnpm install --prod --frozen-lockfile
 

@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { WinstonModule } from 'nest-winston';
 import { logger } from './logger';
 import { SocketIoAdapter } from './socket-io.adapter';
+import { getCorsOrigins } from './cors-origins';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -12,7 +13,7 @@ async function bootstrap() {
   });
 
   app.enableCors({
-    origin: ['https://www.splendor.uno', 'http://localhost:3000'],
+    origin: getCorsOrigins(),
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
@@ -23,12 +24,17 @@ async function bootstrap() {
     maxAge: 86400,
   });
 
+  // Fly.io HTTP health check (and simple liveness for local/Docker).
+  app.getHttpAdapter().get('/health', (_req: unknown, res: any) => {
+    res.status(200).send('ok');
+  });
+
   app.useWebSocketAdapter(new SocketIoAdapter(app));
 
-  const port = process.env.PORT || 3001;
-  await app.listen(port);
+  const port = Number(process.env.PORT) || 3001;
+  const host = process.env.HOST || '0.0.0.0';
+  await app.listen(port, host);
 
-  // 用 logger
   logger.info(`Application is running on: ${await app.getUrl()}`);
 }
 bootstrap();
