@@ -1,8 +1,7 @@
-# Fly.io app config for the NestJS + Socket.IO Splendor server.
-# Suggested app name: splendor-server (or firingj-splendor-server if taken).
+# fly.toml app configuration file generated for splendor-server on 2026-09-20T14:22:30Z
 #
-# Rooms are in-memory — keep a single machine (see min_machines_running / scale).
-# WebSockets / Socket.IO work via the HTTP service (upgrade supported by default).
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
 app = 'splendor-server'
 primary_region = 'sin'
@@ -26,15 +25,10 @@ primary_region = 'sin'
   auto_start_machines = true
   min_machines_running = 1
   processes = ['app']
-
-  [[http_service.checks]]
-    interval = '15s'
-    timeout = '2s'
-    grace_period = '20s'
-    method = 'GET'
-    path = '/health'
+  checks = [{ grace_period = '20s', interval = '15s', method = 'GET', path = '/health', timeout = '2s' }]
 
 [[vm]]
   memory = '512mb'
   cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
