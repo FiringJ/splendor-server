@@ -1,4 +1,4 @@
-import { Card, GameState, Gems, Noble, Player } from './interfaces/game.interface';
+import { Card, GameAction, GameState, Gems, Noble, Player } from './interfaces/game.interface';
 import { GameService } from './game.service';
 import {
   MAX_CHOICE_OPTIONS,
@@ -63,6 +63,34 @@ function state(players: Player[], partial: Partial<GameState> = {}): GameState {
     lastRoundStartPlayer: null,
     actions: [],
     ...partial,
+  };
+}
+
+function snapshot(game: GameState) {
+  return {
+    ...game,
+    players: [...game.players.entries()].map(([id, item]) => [
+      id,
+      {
+        ...item,
+        gems: { ...item.gems },
+        cards: [...item.cards],
+        reservedCards: [...item.reservedCards],
+        nobles: [...item.nobles],
+      },
+    ]),
+    gems: { ...game.gems },
+    cards: {
+      level1: [...game.cards.level1],
+      level2: [...game.cards.level2],
+      level3: [...game.cards.level3],
+      deck1: [...game.cards.deck1],
+      deck2: [...game.cards.deck2],
+      deck3: [...game.cards.deck3],
+    },
+    nobles: [...game.nobles],
+    actions: [...game.actions],
+    pendingDiscard: game.pendingDiscard ? { ...game.pendingDiscard } : undefined,
   };
 }
 
@@ -304,5 +332,60 @@ describe('listLegalActions', () => {
     expect(discarder.gems.diamond).toBe(10);
     expect(discarded.pendingDiscard).toBeUndefined();
     expect(discarded.currentTurn).toBe('p2');
+  });
+});
+
+describe('isApplicableAction after the game has a winner', () => {
+  const gameService = new GameService();
+
+  it('rejects a normally legal take and lists no actions once a winner is set', () => {
+    const game = state([player('p1'), player('p2')]);
+    const action: GameAction = {
+      type: 'TAKE_GEMS',
+      playerId: 'p1',
+      payload: { gems: { diamond: 2 } },
+    };
+
+    expect(isApplicableAction(gameService, game, 'p1', action)).toBe(true);
+    expect(listLegalActions(gameService, game, 'p1').map((item) => item.key)).toContain('take_diamond2');
+
+    for (const winner of ['p1', 'p2']) {
+      game.winner = winner;
+      const stateBefore = snapshot(game);
+      const actionBefore = JSON.parse(JSON.stringify(action));
+
+      expect(isApplicableAction(gameService, game, 'p1', action)).toBe(false);
+      expect(listLegalActions(gameService, game, 'p1')).toEqual([]);
+      expect(snapshot(game)).toEqual(stateBefore);
+      expect(action).toEqual(actionBefore);
+    }
+  });
+
+  it('rejects a legal pending discard once a winner is set, whichever player won', () => {
+    const me = player('p1', { gems: gems({ diamond: 6, gold: 5 }) });
+    const rival = player('p2');
+    const game = state([me, rival], {
+      pendingDiscard: { playerId: 'p1', gemsCount: 1 },
+    });
+    const discard: GameAction = {
+      type: 'DISCARD_GEMS',
+      playerId: 'p1',
+      payload: { gems: { diamond: 1 } },
+    };
+
+    expect(Object.values(me.gems).reduce((sum, count) => sum + count, 0)).toBe(11);
+    expect(isApplicableAction(gameService, game, 'p1', discard)).toBe(true);
+    expect(listLegalActions(gameService, game, 'p1').map((item) => item.key)).toContain('discard_diamond1');
+
+    for (const winner of ['p1', 'p2']) {
+      game.winner = winner;
+      const stateBefore = snapshot(game);
+      const actionBefore = JSON.parse(JSON.stringify(discard));
+
+      expect(isApplicableAction(gameService, game, 'p1', discard)).toBe(false);
+      expect(listLegalActions(gameService, game, 'p1')).toEqual([]);
+      expect(snapshot(game)).toEqual(stateBefore);
+      expect(discard).toEqual(actionBefore);
+    }
   });
 });
