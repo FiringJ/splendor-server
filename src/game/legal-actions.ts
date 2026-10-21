@@ -86,7 +86,7 @@ export function isApplicableAction(
   action: GameAction,
 ): boolean {
   const player = state.players.get(playerId);
-  if (!player || state.currentTurn !== playerId || !action) return false;
+  if (!player || state.winner || state.currentTurn !== playerId || !action) return false;
 
   if (state.pendingDiscard?.playerId === playerId) {
     return action.type === 'DISCARD_GEMS'
